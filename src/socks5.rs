@@ -6,11 +6,10 @@ use std::{
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use uri::addr::Addr;
-use uri::uri::Uri;
+use uri::Addr;
+use uri::Uri;
 
 use crate::error::{Error, Result};
-
 
 const SOCKS5_VERSION: u8 = 0x05;
 
