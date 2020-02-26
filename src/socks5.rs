@@ -519,19 +519,7 @@ impl SocksResponse {
 }
 
 pub async fn connect(proxy: &str, target: &str) -> Result<TcpStream> {
-    let mut stream = TcpStream::connect(proxy).await?;
-    AuthRequest::new(AuthMethod::NoAuth)
-        .send(&mut stream)
-        .await?;
-    AuthResponse::read(&mut stream)
-        .await?
-        .check(AuthMethod::NoAuth)?;
-    let uri = target.parse::<Uri>()?;
-    SocksRequest::new(Command::TCPConnection, &uri)?
-        .send(&mut stream)
-        .await?;
-    SocksResponse::read(&mut stream).await?;
-    Ok(stream)
+    connect_uri(&proxy.parse::<Uri>()?, &target.parse::<Uri>()?).await
 }
 
 pub async fn connect_plain(
@@ -539,8 +527,17 @@ pub async fn connect_plain(
     target: &str,
     username: &str,
     password: &str,
+)-> Result<TcpStream> {
+    connect_plain_uri(&proxy.parse::<Uri>()?, &target.parse::<Uri>()?, username, password).await
+}
+
+pub async fn connect_plain_uri(
+    proxy: &Uri,
+    target: &Uri,
+    username: &str,
+    password: &str,
 ) -> Result<TcpStream> {
-    let mut stream = TcpStream::connect(proxy).await?;
+    let mut stream = TcpStream::connect(proxy.socket_addr()?).await?;
     AuthRequest::new(AuthMethod::Plain)
         .send(&mut stream)
         .await?;
@@ -551,8 +548,22 @@ pub async fn connect_plain(
         .send(&mut stream)
         .await?;
     UserPassResponse::read(&mut stream).await?;
-    let uri = target.parse::<Uri>()?;
-    SocksRequest::new(Command::TCPConnection, &uri)?
+    SocksRequest::new(Command::TCPConnection, &target)?
+        .send(&mut stream)
+        .await?;
+    SocksResponse::read(&mut stream).await?;
+    Ok(stream)
+}
+
+pub async fn connect_uri(proxy: &Uri, target: &Uri) -> Result<TcpStream> {
+    let mut stream = TcpStream::connect(proxy.socket_addr()?).await?;
+    AuthRequest::new(AuthMethod::NoAuth)
+        .send(&mut stream)
+        .await?;
+    AuthResponse::read(&mut stream)
+        .await?
+        .check(AuthMethod::NoAuth)?;
+    SocksRequest::new(Command::TCPConnection, &target)?
         .send(&mut stream)
         .await?;
     SocksResponse::read(&mut stream).await?;
