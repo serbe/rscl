@@ -527,8 +527,14 @@ pub async fn connect_plain(
     target: &str,
     username: &str,
     password: &str,
-)-> Result<TcpStream> {
-    connect_plain_uri(&proxy.parse::<Uri>()?, &target.parse::<Uri>()?, username, password).await
+) -> Result<TcpStream> {
+    connect_plain_uri(
+        &proxy.parse::<Uri>()?,
+        &target.parse::<Uri>()?,
+        username,
+        password,
+    )
+    .await
 }
 
 pub async fn connect_plain_uri(
@@ -557,12 +563,12 @@ pub async fn connect_uri(proxy: &Uri, target: &Uri) -> Result<TcpStream> {
             .await?;
         UserPassResponse::read(&mut stream).await?;
     } else {
-    AuthRequest::new(AuthMethod::NoAuth)
-        .send(&mut stream)
-        .await?;
-    AuthResponse::read(&mut stream)
-        .await?
-        .check(AuthMethod::NoAuth)?;
+        AuthRequest::new(AuthMethod::NoAuth)
+            .send(&mut stream)
+            .await?;
+        AuthResponse::read(&mut stream)
+            .await?
+            .check(AuthMethod::NoAuth)?;
     }
     SocksRequest::new(Command::TCPConnection, &target)?
         .send(&mut stream)
