@@ -537,32 +537,33 @@ pub async fn connect_plain_uri(
     username: &str,
     password: &str,
 ) -> Result<TcpStream> {
-    let mut stream = TcpStream::connect(proxy.socket_addr()?).await?;
-    AuthRequest::new(AuthMethod::Plain)
-        .send(&mut stream)
-        .await?;
-    AuthResponse::read(&mut stream)
-        .await?
-        .check(AuthMethod::Plain)?;
-    UserPassRequest::new(username, password)?
-        .send(&mut stream)
-        .await?;
-    UserPassResponse::read(&mut stream).await?;
-    SocksRequest::new(Command::TCPConnection, &target)?
-        .send(&mut stream)
-        .await?;
-    SocksResponse::read(&mut stream).await?;
-    Ok(stream)
+    let proxy = proxy.set_authority(username, password)?;
+    connect_uri(&proxy, target).await
 }
 
 pub async fn connect_uri(proxy: &Uri, target: &Uri) -> Result<TcpStream> {
     let mut stream = TcpStream::connect(proxy.socket_addr()?).await?;
+    if proxy.authority().username().is_some() {
+        let authority = proxy.authority();
+        let (username, password) = authority.user_pass();
+        AuthRequest::new(AuthMethod::Plain)
+            .send(&mut stream)
+            .await?;
+        AuthResponse::read(&mut stream)
+            .await?
+            .check(AuthMethod::Plain)?;
+        UserPassRequest::new(username, password)?
+            .send(&mut stream)
+            .await?;
+        UserPassResponse::read(&mut stream).await?;
+    } else {
     AuthRequest::new(AuthMethod::NoAuth)
         .send(&mut stream)
         .await?;
     AuthResponse::read(&mut stream)
         .await?
         .check(AuthMethod::NoAuth)?;
+    }
     SocksRequest::new(Command::TCPConnection, &target)?
         .send(&mut stream)
         .await?;
