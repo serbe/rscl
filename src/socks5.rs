@@ -281,7 +281,7 @@ impl UserPassRequest {
 
     fn to_vec(&self) -> Vec<u8> {
         let mut buf = Vec::new();
-        buf.push(self.ver.into());
+        buf.push(self.ver);
         buf.push(self.ulen as u8);
         buf.extend_from_slice(&self.uname);
         buf.push(self.plen as u8);
