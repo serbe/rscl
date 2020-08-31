@@ -192,9 +192,12 @@ impl AuthResponse {
             }
         }
     }
+
     fn check(&self, method: AuthMethod) -> Result<()> {
         if self.method != method {
             Err(Error::MethodWrong)
+        } else if self.ver != consts::SOCKS5_VERSION {
+            Err(Error::NotSupportedSocksVersion(self.ver))
         } else {
             Ok(())
         }
@@ -337,21 +340,18 @@ struct SocksRequest {
     ver: u8,
     cmd: Command,
     rsv: u8,
-    // atyp: AddrType,
     dst_addr: Addr,
     dst_port: u16,
 }
 
 impl SocksRequest {
     fn new(command: Command, url: &Url) -> Result<SocksRequest> {
-        // let atyp = AddrType::try_from(url)?;
         let dst_addr = url.try_into()?;
         let dst_port = url.port_or_known_default().map_or(80, |v| v);
         Ok(SocksRequest {
             ver: consts::SOCKS5_VERSION,
             cmd: command,
             rsv: 0u8,
-            // atyp,
             dst_addr,
             dst_port,
         })
@@ -439,20 +439,7 @@ impl SocksResponse {
         if ver != consts::SOCKS5_VERSION {
             return Err(Error::NotSupportedSocksVersion(ver));
         }
-        match rep {
-            consts::SOCKS5_REPLY_SUCCESS => Ok(()),
-            consts::SOCKS5_REPLY_GENERAL_SERVER_FAILURE => Err(Error::ReplyGeneralFailure),
-            consts::SOCKS5_REPLY_CONNECTION_NOT_ALLOWED => Err(Error::ReplyConnectionNotAllowed),
-            consts::SOCKS5_REPLY_NETWORK_UNREACHABLE => Err(Error::ReplyNetworkUnreachable),
-            consts::SOCKS5_REPLY_HOST_UNREACHABLE => Err(Error::ReplyHostUnreachable),
-            consts::SOCKS5_REPLY_CONNECTION_REFUSED => Err(Error::ReplyConnectionRefused),
-            consts::SOCKS5_REPLY_TTL_EXPIRED => Err(Error::ReplyTtlExpired),
-            consts::SOCKS5_REPLY_COMMAND_NOT_SUPPORTED => Err(Error::ReplyCommandNotSupported),
-            consts::SOCKS5_REPLY_ADDRESS_TYPE_NOT_SUPPORTED => {
-                Err(Error::ReplyAddressTypeNotSupported)
-            }
-            v => Err(Error::ReplyUnassigned(v)),
-        }?;
+        let _ = check_reply(rep)?;
         if rsv != 0u8 {
             return Err(Error::WrongReserved(rsv));
         }
@@ -484,6 +471,23 @@ impl SocksResponse {
             bndaddr,
             bndport,
         })
+    }
+}
+
+fn check_reply(value: u8) -> Result<()> {
+    match value {
+        consts::SOCKS5_REPLY_SUCCESS => Ok(()),
+        consts::SOCKS5_REPLY_GENERAL_SERVER_FAILURE => Err(Error::ReplyGeneralFailure),
+        consts::SOCKS5_REPLY_CONNECTION_NOT_ALLOWED => Err(Error::ReplyConnectionNotAllowed),
+        consts::SOCKS5_REPLY_NETWORK_UNREACHABLE => Err(Error::ReplyNetworkUnreachable),
+        consts::SOCKS5_REPLY_HOST_UNREACHABLE => Err(Error::ReplyHostUnreachable),
+        consts::SOCKS5_REPLY_CONNECTION_REFUSED => Err(Error::ReplyConnectionRefused),
+        consts::SOCKS5_REPLY_TTL_EXPIRED => Err(Error::ReplyTtlExpired),
+        consts::SOCKS5_REPLY_COMMAND_NOT_SUPPORTED => Err(Error::ReplyCommandNotSupported),
+        consts::SOCKS5_REPLY_ADDRESS_TYPE_NOT_SUPPORTED => {
+            Err(Error::ReplyAddressTypeNotSupported)
+        }
+        v => Err(Error::ReplyUnassigned(v)),
     }
 }
 

@@ -42,7 +42,8 @@ impl TryFrom<Url> for Addr {
     type Error = crate::error::Error;
 
     fn try_from(url: Url) -> Result<Self> {
-        Ok(url.as_str().parse()?)
+        let host = url.host_str().ok_or(Error::ParseHost)?;
+        Ok(host.parse()?)
     }
 }
 
@@ -50,7 +51,8 @@ impl TryFrom<&Url> for Addr {
     type Error = crate::error::Error;
 
     fn try_from(url: &Url) -> Result<Self> {
-        Ok(url.as_str().parse()?)
+        let host = url.host_str().ok_or(Error::ParseHost)?;
+        Ok(host.parse()?)
     }
 }
 
