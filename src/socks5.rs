@@ -1,14 +1,13 @@
 use std::{
-    convert::{From, TryFrom, TryInto},
+    convert::{From, TryFrom},
     net::{Ipv4Addr, Ipv6Addr},
     u8,
 };
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use url::Url;
+use uri::{Addr, Uri};
 
-use crate::addr::Addr;
 use crate::consts;
 use crate::error::{Error, Result};
 
@@ -345,9 +344,9 @@ struct SocksRequest {
 }
 
 impl SocksRequest {
-    fn new(command: Command, url: &Url) -> Result<SocksRequest> {
-        let dst_addr = url.try_into()?;
-        let dst_port = url.port_or_known_default().map_or(80, |v| v);
+    fn new(command: Command, url: &Uri) -> Result<SocksRequest> {
+        let dst_addr = url.addr();
+        let dst_port = url.default_port().map_or(80, |v| v);
         Ok(SocksRequest {
             ver: consts::SOCKS5_VERSION,
             cmd: command,
@@ -362,7 +361,7 @@ impl SocksRequest {
         buf.push(self.ver);
         buf.push(self.cmd.into());
         buf.push(self.rsv);
-        buf.push(self.dst_addr.get_type());
+        buf.push(addr_type(&self.dst_addr));
         for method in self.dst_addr.to_vec() {
             buf.push(method);
         }
@@ -501,18 +500,12 @@ pub async fn connect_plain<P, T>(
     username: &str,
     password: Option<&str>,
 ) -> Result<TcpStream> {
-    let mut proxy: Url = proxy_str.parse()?;
-    let _ = proxy
-        .set_username(username)
-        .map_err(|_| Error::BadUsername)?;
-    let _ = proxy
-        .set_password(password)
-        .map_err(|_| Error::BadPassword)?;
+    let proxy: Uri = proxy_str.parse::<Uri>()?.set_authority(username, password.map_or("", |v| v))?;
     connect_uri(&proxy, &target_str.parse()?).await
 }
 
-pub async fn connect_uri(proxy: &Url, target: &Url) -> Result<TcpStream> {
-    let socket_address = proxy.socket_addrs(|| proxy.port_or_known_default())?;
+pub async fn connect_uri(proxy: &Uri, target: &Uri) -> Result<TcpStream> {
+    let socket_address = proxy.socket_addrs()?;
     let mut stream = TcpStream::connect(
         socket_address
             .iter()
@@ -520,9 +513,9 @@ pub async fn connect_uri(proxy: &Url, target: &Url) -> Result<TcpStream> {
             .map_or(Err(Error::SocketAddr), Ok)?,
     )
     .await?;
-    if proxy.has_authority() {
-        let username = proxy.username();
-        let password = proxy.password().map_or("", |v| v);
+    if proxy.authority().username().is_some() {
+        let authority = proxy.authority();
+        let (username, password) = authority.user_pass();
         AuthRequest::new(AuthMethod::Plain)
             .send(&mut stream)
             .await?;
@@ -546,4 +539,12 @@ pub async fn connect_uri(proxy: &Url, target: &Url) -> Result<TcpStream> {
         .await?;
     SocksResponse::read(&mut stream).await?;
     Ok(stream)
+}
+
+pub fn addr_type(addr: &Addr) -> u8 {
+    match addr {
+        Addr::Ipv4(_) => consts::SOCKS5_ADDRESS_TYPE_IPV4,
+        Addr::Ipv6(_) => consts::SOCKS5_ADDRESS_TYPE_IPV6,
+        Addr::Domain(_) => consts::SOCKS5_ADDRESS_TYPE_DOMAINNAME,
+    }
 }

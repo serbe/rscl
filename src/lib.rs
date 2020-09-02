@@ -1,4 +1,3 @@
-pub mod addr;
 pub mod consts;
 pub mod error;
 pub mod socks5;

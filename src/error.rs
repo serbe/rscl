@@ -7,7 +7,7 @@ pub type Result<T> = result::Result<T, Error>;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("url error")]
-    UrlParseError(#[from] url::ParseError),
+    UrlParseError(#[from] uri::Error),
     #[error("Socks version: {0} not supported")]
     NotSupportedSocksVersion(u8),
     #[error("Version: {0} not supported")]
