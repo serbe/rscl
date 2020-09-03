@@ -1,6 +1,6 @@
 [package]
 name = "rsl"
-version = "0.2.2"
+version = "0.2.3"
 authors = ["mkoctuk <mkoctuk@gmail.com>"]
 edition = "2018"
 

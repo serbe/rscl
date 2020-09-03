@@ -6,7 +6,6 @@ pub mod socks5;
 mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    // use url::Url;
 
     #[tokio::test]
     async fn conn() {

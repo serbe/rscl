@@ -292,14 +292,16 @@ impl UserPassResponse {
     async fn read(stream: &mut TcpStream) -> Result<UserPassResponse> {
         let mut buf = [0u8; 2];
         stream.read_exact(&mut buf).await?;
-        let ver = buf[0];
-        let status = buf[1];
-        if ver != 1u8 {
-            Err(Error::NotSupportedVersion(ver))
-        } else if status != 0u8 {
-            Err(Error::WrongStatus(status))
+        Ok(UserPassResponse { ver: buf[0], status: buf[1] })
+    }
+
+    fn check(&self) -> Result<()> {
+        if self.ver != 1u8 {
+            Err(Error::NotSupportedVersion(self.ver))
+        } else if self.status != 0u8 {
+            Err(Error::WrongStatus(self.status))
         } else {
-            Ok(UserPassResponse { ver, status })
+            Ok(())
         }
     }
 }
@@ -377,6 +379,11 @@ impl SocksRequest {
     }
 }
 
+pub struct ServerBound {
+    pub addr: Addr,
+    pub port: u16,
+}
+
 /// Read socks replies
 ///
 /// ```plain
@@ -419,30 +426,31 @@ impl SocksRequest {
 /// authentication, integrity and/or confidentiality, the replies are
 /// encapsulated in the method-dependent encapsulation.
 /// ```
-struct SocksResponse {
+struct SocksReplies {
     ver: u8,
     rep: u8,
     rsv: u8,
-    bndaddr: Addr,
-    bndport: u16,
+    atyp: u8,
 }
 
-impl SocksResponse {
-    async fn read(stream: &mut TcpStream) -> Result<Self> {
+impl SocksReplies {
+    async fn read(stream: &mut TcpStream) -> Result<SocksReplies> {
         let mut buf = [0u8; 4];
         stream.read_exact(&mut buf).await?;
-        let ver = buf[0];
-        let rep = buf[1];
-        let rsv = buf[2];
-        let atyp = buf[3];
-        if ver != consts::SOCKS5_VERSION {
-            return Err(Error::NotSupportedSocksVersion(ver));
+        Ok(SocksReplies{
+            ver: buf[0], rep: buf[1], rsv: buf[2], atyp: buf[3],
+        })
+    }
+
+    async fn get_addr(&self, stream: &mut TcpStream) -> Result<ServerBound> {
+        if self.ver != consts::SOCKS5_VERSION {
+            return Err(Error::NotSupportedSocksVersion(self.ver));
         }
-        let _ = check_reply(rep)?;
-        if rsv != 0u8 {
-            return Err(Error::WrongReserved(rsv));
+        let _ = check_reply(self.rep)?;
+        if self.rsv != 0u8 {
+            return Err(Error::WrongReserved(self.rsv));
         }
-        let bndaddr: Addr = match atyp {
+        let addr: Addr = match self.atyp {
             consts::SOCKS5_ADDRESS_TYPE_IPV4 => {
                 let mut buf = [0u8; 4];
                 stream.read_exact(&mut buf).await?;
@@ -462,13 +470,10 @@ impl SocksResponse {
             }
             u => Err(Error::AddressTypeNotSupported(u)),
         }?;
-        let bndport = stream.read_u16().await?;
-        Ok(SocksResponse {
-            ver,
-            rep,
-            rsv,
-            bndaddr,
-            bndport,
+        let port = stream.read_u16().await?;
+        Ok(ServerBound {
+            addr,
+            port,
         })
     }
 }
@@ -525,7 +530,8 @@ pub async fn connect_uri(proxy: &Uri, target: &Uri) -> Result<TcpStream> {
         UserPassRequest::new(username, password)?
             .send(&mut stream)
             .await?;
-        UserPassResponse::read(&mut stream).await?;
+        UserPassResponse::read(&mut stream).await?.check()?;
+
     } else {
         AuthRequest::new(AuthMethod::NoAuth)
             .send(&mut stream)
@@ -537,7 +543,7 @@ pub async fn connect_uri(proxy: &Uri, target: &Uri) -> Result<TcpStream> {
     SocksRequest::new(Command::TCPConnection, &target)?
         .send(&mut stream)
         .await?;
-    SocksResponse::read(&mut stream).await?;
+    SocksReplies::read(&mut stream).await?.get_addr(&mut stream).await?;
     Ok(stream)
 }
 
