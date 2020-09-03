@@ -520,14 +520,15 @@ pub async fn connect_uri(proxy: &Uri, target: &Uri) -> Result<TcpStream> {
     .await?;
     if proxy.authority().username().is_some() {
         let authority = proxy.authority();
-        let (username, password) = authority.user_pass();
+        let username = authority.decode_username().map_or(String::new(), |v| v);
+        let password = authority.decode_password().map_or(String::new(), |v| v);
         AuthRequest::new(AuthMethod::Plain)
             .send(&mut stream)
             .await?;
         AuthResponse::read(&mut stream)
             .await?
             .check(AuthMethod::Plain)?;
-        UserPassRequest::new(username, password)?
+        UserPassRequest::new(&username, &password)?
             .send(&mut stream)
             .await?;
         UserPassResponse::read(&mut stream).await?.check()?;
