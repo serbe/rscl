@@ -292,7 +292,10 @@ impl UserPassResponse {
     async fn read(stream: &mut TcpStream) -> Result<UserPassResponse> {
         let mut buf = [0u8; 2];
         stream.read_exact(&mut buf).await?;
-        Ok(UserPassResponse { ver: buf[0], status: buf[1] })
+        Ok(UserPassResponse {
+            ver: buf[0],
+            status: buf[1],
+        })
     }
 
     fn check(&self) -> Result<()> {
@@ -437,8 +440,11 @@ impl SocksReplies {
     async fn read(stream: &mut TcpStream) -> Result<SocksReplies> {
         let mut buf = [0u8; 4];
         stream.read_exact(&mut buf).await?;
-        Ok(SocksReplies{
-            ver: buf[0], rep: buf[1], rsv: buf[2], atyp: buf[3],
+        Ok(SocksReplies {
+            ver: buf[0],
+            rep: buf[1],
+            rsv: buf[2],
+            atyp: buf[3],
         })
     }
 
@@ -471,10 +477,7 @@ impl SocksReplies {
             u => Err(Error::AddressTypeNotSupported(u)),
         }?;
         let port = stream.read_u16().await?;
-        Ok(ServerBound {
-            addr,
-            port,
-        })
+        Ok(ServerBound { addr, port })
     }
 }
 
@@ -488,9 +491,7 @@ fn check_reply(value: u8) -> Result<()> {
         consts::SOCKS5_REPLY_CONNECTION_REFUSED => Err(Error::ReplyConnectionRefused),
         consts::SOCKS5_REPLY_TTL_EXPIRED => Err(Error::ReplyTtlExpired),
         consts::SOCKS5_REPLY_COMMAND_NOT_SUPPORTED => Err(Error::ReplyCommandNotSupported),
-        consts::SOCKS5_REPLY_ADDRESS_TYPE_NOT_SUPPORTED => {
-            Err(Error::ReplyAddressTypeNotSupported)
-        }
+        consts::SOCKS5_REPLY_ADDRESS_TYPE_NOT_SUPPORTED => Err(Error::ReplyAddressTypeNotSupported),
         v => Err(Error::ReplyUnassigned(v)),
     }
 }
@@ -505,19 +506,16 @@ pub async fn connect_plain<P, T>(
     username: &str,
     password: Option<&str>,
 ) -> Result<TcpStream> {
-    let proxy: Uri = proxy_str.parse::<Uri>()?.set_authority(username, password.map_or("", |v| v))?;
+    let proxy: Uri = proxy_str
+        .parse::<Uri>()?
+        .set_authority(username, password.map_or("", |v| v))?;
     connect_uri(&proxy, &target_str.parse()?).await
 }
 
 pub async fn connect_uri(proxy: &Uri, target: &Uri) -> Result<TcpStream> {
     let socket_address = proxy.socket_addrs()?;
-    let mut stream = TcpStream::connect(
-        socket_address
-            .iter()
-            .next()
-            .map_or(Err(Error::SocketAddr), Ok)?,
-    )
-    .await?;
+    let mut stream =
+        TcpStream::connect(socket_address.get(0).map_or(Err(Error::SocketAddr), Ok)?).await?;
     if proxy.authority().username().is_some() {
         let authority = proxy.authority();
         let username = authority.decode_username().map_or(String::new(), |v| v);
@@ -532,7 +530,6 @@ pub async fn connect_uri(proxy: &Uri, target: &Uri) -> Result<TcpStream> {
             .send(&mut stream)
             .await?;
         UserPassResponse::read(&mut stream).await?.check()?;
-
     } else {
         AuthRequest::new(AuthMethod::NoAuth)
             .send(&mut stream)
@@ -544,7 +541,10 @@ pub async fn connect_uri(proxy: &Uri, target: &Uri) -> Result<TcpStream> {
     SocksRequest::new(Command::TCPConnection, &target)?
         .send(&mut stream)
         .await?;
-    SocksReplies::read(&mut stream).await?.get_addr(&mut stream).await?;
+    SocksReplies::read(&mut stream)
+        .await?
+        .get_addr(&mut stream)
+        .await?;
     Ok(stream)
 }
 
