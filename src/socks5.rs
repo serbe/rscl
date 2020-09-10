@@ -350,7 +350,7 @@ struct SocksRequest {
 
 impl SocksRequest {
     fn new(command: Command, url: &Uri) -> Result<SocksRequest> {
-        let dst_addr = url.addr();
+        let dst_addr = url.addr()?;
         let dst_port = url.default_port().map_or(80, |v| v);
         Ok(SocksRequest {
             ver: consts::SOCKS5_VERSION,
@@ -504,11 +504,11 @@ pub async fn connect_plain<P, T>(
     proxy_str: &str,
     target_str: &str,
     username: &str,
-    password: Option<&str>,
+    password: &str,
 ) -> Result<TcpStream> {
     let proxy: Uri = proxy_str
         .parse::<Uri>()?
-        .set_authority(username, password.map_or("", |v| v))?;
+        .set_authority(username, password)?;
     connect_uri(&proxy, &target_str.parse()?).await
 }
 
@@ -516,10 +516,16 @@ pub async fn connect_uri(proxy: &Uri, target: &Uri) -> Result<TcpStream> {
     let socket_address = proxy.socket_addrs()?;
     let mut stream =
         TcpStream::connect(socket_address.get(0).map_or(Err(Error::SocketAddr), Ok)?).await?;
-    if proxy.authority().username().is_some() {
+    if proxy.username().is_some() && proxy.authority().is_some() {
         let authority = proxy.authority();
-        let username = authority.decode_username().map_or(String::new(), |v| v);
-        let password = authority.decode_password().map_or(String::new(), |v| v);
+        let username = authority
+            .as_ref()
+            .and_then(|authority| authority.decode_username())
+            .map_or(String::new(), |v| v);
+        let password = authority
+            .as_ref()
+            .and_then(|authority| authority.decode_password())
+            .map_or(String::new(), |v| v);
         AuthRequest::new(AuthMethod::Plain)
             .send(&mut stream)
             .await?;
