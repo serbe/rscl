@@ -6,7 +6,7 @@ use std::{
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use uri::{Addr, Uri};
+use url::{Host, Url};
 
 use crate::consts;
 use crate::error::{Error, Result};
@@ -344,14 +344,14 @@ struct SocksRequest {
     ver: u8,
     cmd: Command,
     rsv: u8,
-    dst_addr: Addr,
+    dst_addr: Host,
     dst_port: u16,
 }
 
 impl SocksRequest {
-    fn new(command: Command, url: &Uri) -> Result<SocksRequest> {
-        let dst_addr = url.addr()?;
-        let dst_port = url.default_port().map_or(80, |v| v);
+    fn new(command: Command, url: &Url) -> Result<SocksRequest> {
+        let dst_addr = url.host().ok_or(Error::ParseAddr)?.to_owned();
+        let dst_port = url.port_or_known_default().ok_or(Error::UnknownPort)?;
         Ok(SocksRequest {
             ver: consts::SOCKS5_VERSION,
             cmd: command,
@@ -367,7 +367,7 @@ impl SocksRequest {
         buf.push(self.cmd.into());
         buf.push(self.rsv);
         buf.push(addr_type(&self.dst_addr));
-        for method in self.dst_addr.to_vec() {
+        for method in host_vec(&self.dst_addr) {
             buf.push(method);
         }
         buf.push(((self.dst_port >> 8) & 0xff) as u8);
@@ -383,7 +383,7 @@ impl SocksRequest {
 }
 
 pub struct ServerBound {
-    pub addr: Addr,
+    pub addr: Host,
     pub port: u16,
 }
 
@@ -456,23 +456,23 @@ impl SocksReplies {
         if self.rsv != 0u8 {
             return Err(Error::WrongReserved(self.rsv));
         }
-        let addr: Addr = match self.atyp {
+        let addr: Host = match self.atyp {
             consts::SOCKS5_ADDRESS_TYPE_IPV4 => {
                 let mut buf = [0u8; 4];
                 stream.read_exact(&mut buf).await?;
-                Ok(Addr::Ipv4(Ipv4Addr::from(buf)))
+                Ok(Host::Ipv4(Ipv4Addr::from(buf)))
             }
             consts::SOCKS5_ADDRESS_TYPE_IPV6 => {
                 let mut buf = [0u8; 16];
                 stream.read_exact(&mut buf).await?;
-                Ok(Addr::Ipv6(Ipv6Addr::from(buf)))
+                Ok(Host::Ipv6(Ipv6Addr::from(buf)))
             }
             consts::SOCKS5_ADDRESS_TYPE_DOMAINNAME => {
                 let mut buf = [0u8];
                 stream.read_exact(&mut buf).await?;
                 let mut buf = Vec::with_capacity(buf[0] as usize);
                 stream.read_buf(&mut buf).await?;
-                Ok(Addr::Domain(String::from_utf8(buf)?))
+                Ok(Host::Domain(String::from_utf8(buf)?))
             }
             u => Err(Error::AddressTypeNotSupported(u)),
         }?;
@@ -506,26 +506,20 @@ pub async fn connect_plain<P, T>(
     username: &str,
     password: &str,
 ) -> Result<TcpStream> {
-    let proxy: Uri = proxy_str
-        .parse::<Uri>()?
-        .set_authority(username, password)?;
+    let mut proxy: Url = proxy_str
+        .parse::<Url>()?;
+    proxy.set_username(username).map_err(|_| Error::BadUsername)?;
+    proxy.set_password(if password.is_empty() { None} else { Some(password)}).map_err(|_| Error::BadPassword)?;
     connect_uri(&proxy, &target_str.parse()?).await
 }
 
-pub async fn connect_uri(proxy: &Uri, target: &Uri) -> Result<TcpStream> {
-    let socket_address = proxy.socket_addrs()?;
+pub async fn connect_uri(proxy: &Url, target: &Url) -> Result<TcpStream> {
+    let socket_address = proxy.socket_addrs(|| None)?.pop().ok_or(Error::SocketAddr)?;
     let mut stream =
-        TcpStream::connect(socket_address.get(0).map_or(Err(Error::SocketAddr), Ok)?).await?;
-    if proxy.username().is_some() && proxy.authority().is_some() {
-        let authority = proxy.authority();
-        let username = authority
-            .as_ref()
-            .and_then(|authority| authority.decode_username())
-            .map_or(String::new(), |v| v);
-        let password = authority
-            .as_ref()
-            .and_then(|authority| authority.decode_password())
-            .map_or(String::new(), |v| v);
+        TcpStream::connect(socket_address).await?;
+    if proxy.has_authority() {
+        let username = proxy.username();
+        let password = proxy.password().map_or("", |v| v);
         AuthRequest::new(AuthMethod::Plain)
             .send(&mut stream)
             .await?;
@@ -554,10 +548,24 @@ pub async fn connect_uri(proxy: &Uri, target: &Uri) -> Result<TcpStream> {
     Ok(stream)
 }
 
-pub fn addr_type(addr: &Addr) -> u8 {
+pub fn addr_type(addr: &Host) -> u8 {
     match addr {
-        Addr::Ipv4(_) => consts::SOCKS5_ADDRESS_TYPE_IPV4,
-        Addr::Ipv6(_) => consts::SOCKS5_ADDRESS_TYPE_IPV6,
-        Addr::Domain(_) => consts::SOCKS5_ADDRESS_TYPE_DOMAINNAME,
+        Host::Ipv4(_) => consts::SOCKS5_ADDRESS_TYPE_IPV4,
+        Host::Ipv6(_) => consts::SOCKS5_ADDRESS_TYPE_IPV6,
+        Host::Domain(_) => consts::SOCKS5_ADDRESS_TYPE_DOMAINNAME,
+    }
+}
+
+fn host_vec(host: &Host) -> Vec<u8> {
+    match host {
+        Host::Ipv4(ipv4) => ipv4.octets().to_vec(),
+        Host::Ipv6(ipv6) => ipv6.octets().to_vec(),
+        Host::Domain(domain) => {
+            let mut vec = Vec::new();
+            let mut addr = domain.as_bytes().to_vec();
+            vec.push(addr.len() as u8);
+            vec.append(&mut addr);
+            vec
+        }
     }
 }

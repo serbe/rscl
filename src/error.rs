@@ -7,7 +7,7 @@ pub type Result<T> = result::Result<T, Error>;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("url error")]
-    UrlParseError(#[from] uri::Error),
+    UrlParseError(#[from] url::ParseError),
     #[error("Socks version: {0} not supported")]
     NotSupportedSocksVersion(u8),
     #[error("Version: {0} not supported")]
@@ -28,8 +28,8 @@ pub enum Error {
     MethodWrong,
     #[error("No get socket address")]
     SocketAddr,
-    // #[error("Connection not allowed by ruleset")]
-    // WrongRuleset,
+    #[error("No get port")]
+    UnknownPort,
     // #[error("Network unreachable")]
     // NetworkUnreachable,
     // #[error("Host unreachable")]
