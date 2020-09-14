@@ -367,7 +367,7 @@ impl SocksRequest {
         buf.push(self.cmd.into());
         buf.push(self.rsv);
         buf.push(addr_type(&self.dst_addr));
-        for method in self.dst_addr.to_vec() {
+        for method in self.dst_addr.to_bytes() {
             buf.push(method);
         }
         buf.push(((self.dst_port >> 8) & 0xff) as u8);
