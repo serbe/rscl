@@ -471,7 +471,7 @@ impl SocksReplies {
                 let mut buf = [0u8];
                 stream.read_exact(&mut buf).await?;
                 let mut buf = Vec::with_capacity(buf[0] as usize);
-                stream.read_buf(&mut buf).await?;
+                stream.read_exact(&mut buf).await?;
                 Ok(Host::Domain(String::from_utf8(buf)?))
             }
             u => Err(Error::AddressTypeNotSupported(u)),
