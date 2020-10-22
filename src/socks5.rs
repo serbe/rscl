@@ -1,15 +1,14 @@
 use std::{
     convert::{From, TryFrom},
-    net::{Ipv4Addr, Ipv6Addr},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, IpAddr},
     u8,
 };
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use uri::{Addr, Uri};
+use uri::{Uri};
 
-use crate::consts;
-use crate::error::{Error, Result};
+use crate::{consts, Error, Result, Addr};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Command {
@@ -340,24 +339,21 @@ impl UserPassResponse {
 /// and destination addresses, and return one or more reply messages, as
 /// appropriate for the request type.
 /// ```
-struct SocksRequest {
+struct SocksRequest<'a> {
     ver: u8,
     cmd: Command,
     rsv: u8,
-    dst_addr: Addr,
-    dst_port: u16,
+    dst: Addr<'a>,
 }
 
-impl SocksRequest {
+impl<'a> SocksRequest<'a> {
     fn new(command: Command, url: &Uri) -> Result<SocksRequest> {
-        let dst_addr = url.addr()?;
-        let dst_port = url.default_port().map_or(80, |v| v);
+        let dst = url.host_with_port().ok_or(Error::ParseAddr)?.parse::<Addr>()?;
         Ok(SocksRequest {
             ver: consts::SOCKS5_VERSION,
             cmd: command,
             rsv: 0u8,
-            dst_addr,
-            dst_port,
+            dst,
         })
     }
 
@@ -366,12 +362,12 @@ impl SocksRequest {
         buf.push(self.ver);
         buf.push(self.cmd.into());
         buf.push(self.rsv);
-        buf.push(addr_type(&self.dst_addr));
-        for method in self.dst_addr.to_bytes() {
-            buf.push(method);
+        buf.push(self.dst.addr_type());
+        for byte in self.dst.to_vec() {
+            buf.push(byte);
         }
-        buf.push(((self.dst_port >> 8) & 0xff) as u8);
-        buf.push((self.dst_port & 0xff) as u8);
+        buf.push(((self.dst.port() >> 8) & 0xff) as u8);
+        buf.push((self.dst.port() & 0xff) as u8);
         buf
     }
 
@@ -382,9 +378,8 @@ impl SocksRequest {
     }
 }
 
-pub struct ServerBound {
-    pub addr: Addr,
-    pub port: u16,
+pub struct ServerBound<'a> {
+    pub addr: Addr<'a>,
 }
 
 /// Read socks replies
@@ -448,7 +443,7 @@ impl SocksReplies {
         })
     }
 
-    async fn get_addr(&self, stream: &mut TcpStream) -> Result<ServerBound> {
+    async fn get_addr<'a>(&self, stream: &mut TcpStream) -> Result<ServerBound<'a>> {
         if self.ver != consts::SOCKS5_VERSION {
             return Err(Error::NotSupportedSocksVersion(self.ver));
         }
@@ -460,24 +455,27 @@ impl SocksReplies {
             consts::SOCKS5_ADDRESS_TYPE_IPV4 => {
                 let mut buf = [0u8; 4];
                 stream.read_exact(&mut buf).await?;
-                Ok(Addr::Ipv4(Ipv4Addr::from(buf)))
+                let port = stream.read_u16().await?;
+                Ok(Addr::IP(SocketAddr::new(IpAddr::V4(Ipv4Addr::from(buf)), port)))
             }
             consts::SOCKS5_ADDRESS_TYPE_IPV6 => {
                 let mut buf = [0u8; 16];
                 stream.read_exact(&mut buf).await?;
-                Ok(Addr::Ipv6(Ipv6Addr::from(buf)))
+                let port = stream.read_u16().await?;
+                Ok(Addr::IP(SocketAddr::new(IpAddr::V6(Ipv6Addr::from(buf)), port)))
             }
             consts::SOCKS5_ADDRESS_TYPE_DOMAINNAME => {
                 let mut buf = [0u8];
                 stream.read_exact(&mut buf).await?;
                 let mut buf = Vec::with_capacity(buf[0] as usize);
                 stream.read_exact(&mut buf).await?;
-                Ok(Addr::Domain(String::from_utf8(buf)?))
+                let port = stream.read_u16().await?;
+                let host = String::from_utf8(buf)?;
+                Ok(Addr::Domain(host.into(), port))
             }
             u => Err(Error::AddressTypeNotSupported(u)),
         }?;
-        let port = stream.read_u16().await?;
-        Ok(ServerBound { addr, port })
+        Ok(ServerBound { addr })
     }
 }
 
@@ -552,12 +550,4 @@ pub async fn connect_uri(proxy: &Uri, target: &Uri) -> Result<TcpStream> {
         .get_addr(&mut stream)
         .await?;
     Ok(stream)
-}
-
-pub fn addr_type(addr: &Addr) -> u8 {
-    match addr {
-        Addr::Ipv4(_) => consts::SOCKS5_ADDRESS_TYPE_IPV4,
-        Addr::Ipv6(_) => consts::SOCKS5_ADDRESS_TYPE_IPV6,
-        Addr::Domain(_) => consts::SOCKS5_ADDRESS_TYPE_DOMAINNAME,
-    }
 }
