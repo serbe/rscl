@@ -1,10 +1,10 @@
+pub mod addr;
 pub mod consts;
 pub mod error;
 pub mod socks5;
-pub mod addr;
 
-pub use error::Error;
 pub use addr::Addr;
+pub use error::Error;
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]

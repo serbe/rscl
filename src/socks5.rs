@@ -1,14 +1,14 @@
 use std::{
     convert::{From, TryFrom},
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr, IpAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     u8,
 };
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use uri::{Uri};
+use uri::Uri;
 
-use crate::{consts, Error, Result, Addr};
+use crate::{consts, Addr, Error, Result};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Command {
@@ -348,7 +348,10 @@ struct SocksRequest<'a> {
 
 impl<'a> SocksRequest<'a> {
     fn new(command: Command, url: &Uri) -> Result<SocksRequest> {
-        let dst = url.host_with_port().ok_or(Error::ParseAddr)?.parse::<Addr>()?;
+        let dst = url
+            .host_with_port()
+            .ok_or(Error::ParseAddr)?
+            .parse::<Addr>()?;
         Ok(SocksRequest {
             ver: consts::SOCKS5_VERSION,
             cmd: command,
@@ -456,13 +459,19 @@ impl SocksReplies {
                 let mut buf = [0u8; 4];
                 stream.read_exact(&mut buf).await?;
                 let port = stream.read_u16().await?;
-                Ok(Addr::IP(SocketAddr::new(IpAddr::V4(Ipv4Addr::from(buf)), port)))
+                Ok(Addr::IP(SocketAddr::new(
+                    IpAddr::V4(Ipv4Addr::from(buf)),
+                    port,
+                )))
             }
             consts::SOCKS5_ADDRESS_TYPE_IPV6 => {
                 let mut buf = [0u8; 16];
                 stream.read_exact(&mut buf).await?;
                 let port = stream.read_u16().await?;
-                Ok(Addr::IP(SocketAddr::new(IpAddr::V6(Ipv6Addr::from(buf)), port)))
+                Ok(Addr::IP(SocketAddr::new(
+                    IpAddr::V6(Ipv6Addr::from(buf)),
+                    port,
+                )))
             }
             consts::SOCKS5_ADDRESS_TYPE_DOMAINNAME => {
                 let mut buf = [0u8];
