@@ -2,6 +2,7 @@ pub mod addr;
 pub mod consts;
 pub mod error;
 pub mod socks5;
+mod utils;
 
 pub use addr::Addr;
 pub use error::Error;
