@@ -3,13 +3,13 @@ use std::{io, net, string};
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("url error {0}")]
-    UrlParseError(#[from] uri::Error),
+    UrlParseError(#[from] url::ParseError),
     #[error("Socks version: {0} not supported")]
     NotSupportedSocksVersion(u8),
     #[error("Version: {0} not supported")]
     NotSupportedVersion(u8),
     #[error("io error {0}")]
-    IO(#[from] io::Error),
+    Io(#[from] io::Error),
     #[error("string from utf8 error {0}")]
     Utf8Error(#[from] string::FromUtf8Error),
     #[error("Net address parse {0}")]
@@ -32,12 +32,10 @@ pub enum Error {
     CommandUnknown(u8),
     #[error("Parse ip version 6")]
     ParseIPv6,
-    #[error("Parse address")]
-    ParseAddr,
     #[error("Parse host")]
     ParseHost,
-    #[error("Parse port: {0}")]
-    ParsePort(String),
+    #[error("Parse port")]
+    ParsePort,
     #[error("Unsupported scheme: {0}")]
     UnsupportedScheme(String),
     #[error("Empty scheme")]

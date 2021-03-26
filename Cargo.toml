@@ -2,14 +2,14 @@
 authors = ["mkoctuk <mkoctuk@gmail.com>"]
 edition = "2018"
 name = "rsl"
-version = "0.4.1"
+version = "0.5.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 thiserror = "1.0"
-tokio = {version = "1.3", features = ["net", "io-util"]}
-uri = {version = "0.3.1", git = "https://github.com/serbe/uri"}
+tokio = {version = "1.4", features = ["net", "io-util"]}
+url = "2.2"
 
 [dev-dependencies]
-tokio = {version = "1.3", features = ["full"]}
+tokio = {version = "1.4", features = ["full"]}

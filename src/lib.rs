@@ -1,9 +1,8 @@
-pub mod addr;
 pub mod consts;
 pub mod error;
 pub mod socks5;
 
-pub use addr::Addr;
+// pub use addr::Addr;
 pub use error::Error;
 pub type Result<T> = std::result::Result<T, Error>;
 
