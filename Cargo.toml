@@ -8,8 +8,8 @@ version = "0.5.1"
 
 [dependencies]
 thiserror = "1.0"
-tokio = {version = "1.4", features = ["net", "io-util"]}
+tokio = {version = "1.5", features = ["net", "io-util"]}
 url = "2.2"
 
 [dev-dependencies]
-tokio = {version = "1.4", features = ["full"]}
+tokio = {version = "1.5", features = ["full"]}
