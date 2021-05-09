@@ -48,9 +48,9 @@ pub enum AuthMethod {
     NoAccept,
 }
 
-impl Into<u8> for AuthMethod {
-    fn into(self) -> u8 {
-        match self {
+impl From<AuthMethod> for u8 {
+    fn from(method: AuthMethod) -> u8 {
+        match method {
             AuthMethod::NoAuth => consts::SOCKS5_AUTH_NONE,
             AuthMethod::GssApi => consts::SOCKS5_AUTH_GSSAPI,
             AuthMethod::Plain => consts::SOCKS5_AUTH_USER_PASSWORD,
