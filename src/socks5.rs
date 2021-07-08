@@ -121,7 +121,7 @@ impl AuthRequest {
     fn to_vec(&self) -> Vec<u8> {
         let mut buf = vec![self.ver, self.nmethods];
         for method in &self.methods {
-            buf.push(method.clone().into());
+            buf.push((*method).into());
         }
         buf
     }
