@@ -557,7 +557,7 @@ pub async fn connect_url(proxy: &Url, target: &Url) -> Result<TcpStream> {
             .await?
             .check(AuthMethod::NoAuth)?;
     }
-    SocksRequest::new(Command::TcpConnection, &target)?
+    SocksRequest::new(Command::TcpConnection, target)?
         .send(&mut stream)
         .await?;
     SocksReplies::read(&mut stream)
