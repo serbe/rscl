@@ -17,9 +17,9 @@ pub enum Command {
     UDPPort,
 }
 
-impl Into<u8> for Command {
-    fn into(self) -> u8 {
-        match self {
+impl From<Command> for u8 {
+    fn from(command: Command) -> u8 {
+        match command {
             Command::TCPConnection => consts::SOCKS5_COMMAND_TCP_CONNECT,
             Command::TCPBinding => consts::SOCKS5_COMMAND_TCP_BIND,
             Command::UDPPort => consts::SOCKS5_COMMAND_UDP_ASSOCIATE,
@@ -48,9 +48,9 @@ pub enum AuthMethod {
     NoAccept,
 }
 
-impl Into<u8> for AuthMethod {
-    fn into(self) -> u8 {
-        match self {
+impl From<AuthMethod> for u8 {
+    fn from(method: AuthMethod) -> u8 {
+        match method {
             AuthMethod::NoAuth => consts::SOCKS5_AUTH_NONE,
             AuthMethod::GSSAPI => consts::SOCKS5_AUTH_GSSAPI,
             AuthMethod::Plain => consts::SOCKS5_AUTH_USER_PASSWORD,
@@ -119,11 +119,9 @@ impl AuthRequest {
     }
 
     fn to_vec(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-        buf.push(self.ver);
-        buf.push(self.nmethods);
+        let mut buf = vec![self.ver, self.nmethods];
         for method in &self.methods {
-            buf.push(method.clone().into());
+            buf.push((*method).into());
         }
         buf
     }
@@ -250,9 +248,7 @@ impl UserPassRequest {
     }
 
     fn to_vec(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-        buf.push(self.ver);
-        buf.push(self.ulen as u8);
+        let mut buf = vec![self.ver, self.ulen as u8];
         buf.extend_from_slice(&self.uname);
         buf.push(self.plen as u8);
         buf.extend_from_slice(&self.passwd);
@@ -361,11 +357,7 @@ impl<'a> SocksRequest<'a> {
     }
 
     fn to_vec(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-        buf.push(self.ver);
-        buf.push(self.cmd.into());
-        buf.push(self.rsv);
-        buf.push(self.dst.addr_type());
+        let mut buf = vec![self.ver, self.cmd.into(), self.rsv, self.dst.addr_type()];
         for byte in self.dst.to_vec() {
             buf.push(byte);
         }
@@ -551,7 +543,7 @@ pub async fn connect_uri(proxy: &Uri, target: &Uri) -> Result<TcpStream> {
             .await?
             .check(AuthMethod::NoAuth)?;
     }
-    SocksRequest::new(Command::TCPConnection, &target)?
+    SocksRequest::new(Command::TCPConnection, target)?
         .send(&mut stream)
         .await?;
     SocksReplies::read(&mut stream)
