@@ -1,19 +1,17 @@
-use std::{io, net, string};
-
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("url error {0}")]
-    UrlParseError(#[from] url::ParseError),
+    UriError(#[from] uri::Error),
     #[error("Socks version: {0} not supported")]
     NotSupportedSocksVersion(u8),
     #[error("Version: {0} not supported")]
     NotSupportedVersion(u8),
     #[error("io error {0}")]
-    Io(#[from] io::Error),
+    Io(#[from] std::io::Error),
     #[error("string from utf8 error {0}")]
-    Utf8Error(#[from] string::FromUtf8Error),
+    Utf8Error(#[from] std::string::FromUtf8Error),
     #[error("Net address parse {0}")]
-    StdParseAddr(#[from] net::AddrParseError),
+    StdParseAddr(#[from] std::net::AddrParseError),
     #[error("Unimplement feature")]
     Unimplement,
     #[error("Auth method not accepted")]
