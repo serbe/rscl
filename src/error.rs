@@ -1,6 +1,6 @@
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("url error {0}")]
+    #[error("uri error {0}")]
     UriError(#[from] uri::Error),
     #[error("Socks version: {0} not supported")]
     NotSupportedSocksVersion(u8),
@@ -64,8 +64,8 @@ pub enum Error {
     ReplyAddressTypeNotSupported,
     #[error("Reply unassigned: {0}")]
     ReplyUnassigned(u8),
-    #[error("No set username for url")]
+    #[error("No set username for uri")]
     BadUsername,
-    #[error("No set password for url")]
+    #[error("No set password for uri")]
     BadPassword,
 }

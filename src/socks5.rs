@@ -518,7 +518,7 @@ fn check_reply(value: u8) -> Result<(), Error> {
 }
 
 pub async fn connect(proxy_str: &str, target_str: &str) -> Result<TcpStream, Error> {
-    connect_url(&proxy_str.parse()?, &target_str.parse()?).await
+    connect_uri(&proxy_str.parse()?, &target_str.parse()?).await
 }
 
 pub async fn connect_plain<P, T>(
@@ -530,10 +530,10 @@ pub async fn connect_plain<P, T>(
     let proxy: Uri = proxy_str.parse()?;
     let proxy = proxy.set_username(username)?;
     let proxy = proxy.set_password(password)?;
-    connect_url(&proxy, &target_str.parse()?).await
+    connect_uri(&proxy, &target_str.parse()?).await
 }
 
-pub async fn connect_url(proxy: &Uri, target: &Uri) -> Result<TcpStream, Error> {
+pub async fn connect_uri(proxy: &Uri, target: &Uri) -> Result<TcpStream, Error> {
     let socket_address = proxy.socket_addr()?;
     let mut stream = TcpStream::connect(socket_address).await?;
     if let Some(username) = proxy.username() {
