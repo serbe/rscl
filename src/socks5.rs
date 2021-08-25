@@ -7,7 +7,7 @@ use std::{
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use uri::{Addr, Uri};
+use uri::{Addr, IntoUri, Uri};
 
 use crate::{consts, Error};
 
@@ -517,25 +517,25 @@ fn check_reply(value: u8) -> Result<(), Error> {
     }
 }
 
-pub async fn connect(proxy_str: &str, target_str: &str) -> Result<TcpStream, Error> {
-    connect_uri(&proxy_str.parse()?, &target_str.parse()?).await
+pub async fn connect<P: IntoUri, T: IntoUri>(proxy: P, target: T) -> Result<TcpStream, Error> {
+    connect_uri(&proxy.into_uri()?, &target.into_uri()?).await
 }
 
-pub async fn connect_plain<P, T>(
-    proxy_str: &str,
-    target_str: &str,
+pub async fn connect_plain<P: IntoUri, T: IntoUri>(
+    proxy: P,
+    target: T,
     username: &str,
     password: &str,
 ) -> Result<TcpStream, Error> {
-    let proxy: Uri = proxy_str.parse()?;
+    let proxy: Uri = proxy.into_uri()?;
     let proxy = proxy.set_username(username)?;
     let proxy = proxy.set_password(password)?;
-    connect_uri(&proxy, &target_str.parse()?).await
+    connect_uri(&proxy, &target.into_uri()?).await
 }
 
 pub async fn connect_uri(proxy: &Uri, target: &Uri) -> Result<TcpStream, Error> {
-    let socket_address = proxy.socket_addr()?;
-    let mut stream = TcpStream::connect(socket_address).await?;
+    let socket_addr = proxy.socket_addr()?;
+    let mut stream = TcpStream::connect(socket_addr).await?;
     if let Some(username) = proxy.username() {
         let password = proxy.password().map_or(String::new(), |v| v.to_string());
         AuthRequest::new(AuthMethod::Plain)
