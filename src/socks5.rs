@@ -345,7 +345,7 @@ struct SocksRequest<'a> {
 
 impl<'a> SocksRequest<'a> {
     fn new(command: Command, uri: &Uri) -> Result<SocksRequest, Error> {
-        let addr = uri.to_string().parse()?;
+        let addr = uri.addr()?;
         Ok(SocksRequest {
             ver: consts::SOCKS5_VERSION,
             cmd: command,
@@ -458,7 +458,7 @@ impl SocksReplies {
         })
     }
 
-    async fn get_host<'a>(&self, stream: &mut TcpStream) -> Result<ServerBound<'a>, Error> {
+    async fn get_addr<'a>(&self, stream: &mut TcpStream) -> Result<ServerBound<'a>, Error> {
         if self.ver != consts::SOCKS5_VERSION {
             return Err(Error::NotSupportedSocksVersion(self.ver));
         }
@@ -561,7 +561,7 @@ pub async fn connect_uri(proxy: &Uri, target: &Uri) -> Result<TcpStream, Error> 
         .await?;
     SocksReplies::read(&mut stream)
         .await?
-        .get_host(&mut stream)
+        .get_addr(&mut stream)
         .await?;
     Ok(stream)
 }
