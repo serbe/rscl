@@ -68,4 +68,12 @@ pub enum Error {
     BadUsername,
     #[error("No set password for uri")]
     BadPassword,
+    #[error("Request rejected or failed")]
+    RequestReject,
+    #[error("Request failed because client is not running identd (or not reachable from server)")]
+    RequestFailedIdentd,
+    #[error("Request failed because client's identd could not confirm the user ID in the request")]
+    RequestFailedUserID,
+    #[error("Wrong request")]
+    RequestWrong,
 }

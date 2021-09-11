@@ -9,21 +9,19 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use uri::{Addr, IntoUri, Uri};
 
-use crate::{consts, Error};
+use crate::{Error, consts::{self, SOCKS4_REQUEST_FAILED_NOT_CONFIRM_USERID, SOCKS4_REQUEST_FAILED_NOT_RUNNING_IDENTD, SOCKS4_REQUEST_GRANTED, SOCKS4_REQUEST_REJECTED_FAILED}};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Command {
     TcpConnection,
     TcpBinding,
-    UdpPort,
 }
 
 impl From<Command> for u8 {
     fn from(command: Command) -> u8 {
         match command {
-            Command::TcpConnection => consts::SOCKS5_COMMAND_TCP_CONNECT,
-            Command::TcpBinding => consts::SOCKS5_COMMAND_TCP_BIND,
-            Command::UdpPort => consts::SOCKS5_COMMAND_UDP_ASSOCIATE,
+            Command::TcpConnection => consts::SOCKS4_COMMAND_TCP_CONNECT,
+            Command::TcpBinding => consts::SOCKS4_COMMAND_TCP_BIND,
         }
     }
 }
@@ -33,170 +31,143 @@ impl TryFrom<u8> for Command {
 
     fn try_from(value: u8) -> Result<Self, Error> {
         match value {
-            consts::SOCKS5_COMMAND_TCP_CONNECT => Ok(Command::TcpConnection),
-            consts::SOCKS5_COMMAND_TCP_BIND => Ok(Command::TcpBinding),
-            consts::SOCKS5_COMMAND_UDP_ASSOCIATE => Ok(Command::UdpPort),
+            consts::SOCKS4_COMMAND_TCP_CONNECT => Ok(Command::TcpConnection),
+            consts::SOCKS4_COMMAND_TCP_BIND => Ok(Command::TcpBinding),
             v => Err(Error::CommandUnknown(v)),
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum AuthMethod {
-    NoAuth,
-    GssApi,
-    Plain,
-    NoAccept,
-}
+// #[derive(Clone, Copy, PartialEq)]
+// pub enum AuthMethod {
+//     NoAuth,
+//     GssApi,
+//     Plain,
+//     NoAccept,
+// }
 
-impl From<AuthMethod> for u8 {
-    fn from(method: AuthMethod) -> u8 {
-        match method {
-            AuthMethod::NoAuth => consts::SOCKS5_AUTH_NONE,
-            AuthMethod::GssApi => consts::SOCKS5_AUTH_GSSAPI,
-            AuthMethod::Plain => consts::SOCKS5_AUTH_USER_PASSWORD,
-            AuthMethod::NoAccept => consts::SOCKS5_AUTH_NO_ACCEPT,
-        }
-    }
-}
+// impl From<AuthMethod> for u8 {
+//     fn from(method: AuthMethod) -> u8 {
+//         match method {
+//             AuthMethod::NoAuth => consts::SOCKS5_AUTH_NONE,
+//             AuthMethod::GssApi => consts::SOCKS5_AUTH_GSSAPI,
+//             AuthMethod::Plain => consts::SOCKS5_AUTH_USER_PASSWORD,
+//             AuthMethod::NoAccept => consts::SOCKS5_AUTH_NO_ACCEPT,
+//         }
+//     }
+// }
 
-impl TryFrom<u8> for AuthMethod {
-    type Error = Error;
+// impl TryFrom<u8> for AuthMethod {
+//     type Error = Error;
 
-    fn try_from(value: u8) -> Result<Self, Error> {
-        match value {
-            consts::SOCKS5_AUTH_NONE => Ok(AuthMethod::NoAuth),
-            consts::SOCKS5_AUTH_GSSAPI => Ok(AuthMethod::GssApi),
-            consts::SOCKS5_AUTH_USER_PASSWORD => Ok(AuthMethod::Plain),
-            consts::SOCKS5_AUTH_NO_ACCEPT => Ok(AuthMethod::NoAccept),
-            v => Err(Error::MethodUnknown(v)),
-        }
-    }
-}
+//     fn try_from(value: u8) -> Result<Self, Error> {
+//         match value {
+//             consts::SOCKS5_AUTH_NONE => Ok(AuthMethod::NoAuth),
+//             consts::SOCKS5_AUTH_GSSAPI => Ok(AuthMethod::GssApi),
+//             consts::SOCKS5_AUTH_USER_PASSWORD => Ok(AuthMethod::Plain),
+//             consts::SOCKS5_AUTH_NO_ACCEPT => Ok(AuthMethod::NoAccept),
+//             v => Err(Error::MethodUnknown(v)),
+//         }
+//     }
+// }
 
 /// Client auth request
 ///
-/// ```plain
-/// The client connects to the server, and sends a version
-/// identifier/method selection message:
+/// CONNECT
 ///
-///                 +----+----------+----------+
-///                 |VER | NMETHODS | METHODS  |
-///                 +----+----------+----------+
-///                 | 1  |    1     | 1 to 255 |
-///                 +----+----------+----------+
+/// The client connects to the SOCKS server and sends a CONNECT request when
+/// it wants to establish a connection to an application server. The client
+/// includes in the request packet the IP address and the port number of the
+/// destination host, and userid, in the following format.
 ///
-/// The VER field is set to X'05' for this version of the protocol.  The
-/// NMETHODS field contains the number of method identifier octets that
-/// appear in the METHODS field.
-/// ```
+/// 		        +-----+-----+---------+-------+--------+------+
+/// 		        | VER | CMD | DSTPORT | DSTIP |   ID   | NULL |
+/// 		        +-----+-----+---------+-------+--------+------+
+///  # of bytes:	   1     1       2        4    variable   1
+///
+/// VN is the SOCKS version number, 0x04 for this version
+/// CD is the SOCKS command code and should be 1 for CONNECT request
+/// ID is the user ID string, variable length, null-terminated.
+/// NULL is a byte all zero bits.
 #[derive(Clone, Debug)]
 struct InitRequest {
     pub ver: u8,
-    pub nmethods: u8,
-    pub methods: Vec<AuthMethod>,
+    pub cmd: u8,
+    pub dstport: [u8; 2],
+    pub dstip: [u8; 4],
+    pub id: Vec<u8>,
+    pub term: u8,
 }
 
 impl InitRequest {
     fn default() -> Self {
         InitRequest {
-            ver: consts::SOCKS5_VERSION,
-            nmethods: 0u8,
-            methods: Vec::new(),
+            ver: consts::SOCKS4_VERSION,
+            cmd: consts::SOCKS4_COMMAND_TCP_CONNECT,
+            dstport: [0u8; 2],
+            dstip: [0u8; 4],
+            id: Vec::new(),
+            term: consts::NULL_TERMINATED,
         }
     }
 
-    fn add_method(&mut self, method: AuthMethod) {
-        if !self.methods.contains(&method) {
-            self.nmethods += 1;
-            self.methods.push(method);
-        }
-    }
+    // fn add_method(&mut self, method: AuthMethod) {
+    //     if !self.methods.contains(&method) {
+    //         self.nmethods += 1;
+    //         self.methods.push(method);
+    //     }
+    // }
 
-    fn new(method: AuthMethod) -> Self {
-        let mut auth_request = InitRequest::default();
-        auth_request.add_method(method);
-        auth_request
-    }
+    // fn new(method: AuthMethod) -> Self {
+    //     let mut auth_request = InitRequest::default();
+    //     auth_request.add_method(method);
+    //     auth_request
+    // }
 
-    fn to_vec(&self) -> Vec<u8> {
-        let mut buf = vec![self.ver, self.nmethods];
-        for method in &self.methods {
-            buf.push((*method).into());
-        }
-        buf
-    }
+    // fn to_vec(&self) -> Vec<u8> {
+    //     let mut buf = vec![self.ver, self.nmethods];
+    //     for method in &self.methods {
+    //         buf.push((*method).into());
+    //     }
+    //     buf
+    // }
 
     // Send auth request to server
-    async fn send(&self, stream: &mut TcpStream) -> Result<(), Error> {
-        let buf = self.to_vec();
-        stream.write_all(&buf).await?;
-        Ok(())
-    }
+    // async fn send(&self, stream: &mut TcpStream) -> Result<(), Error> {
+    //     let buf = self.to_vec();
+    //     stream.write_all(&buf).await?;
+    //     Ok(())
+    // }
 }
 
-/// Server auth response
-///
-/// ```plain
-/// The server selects from one of the methods given in METHODS, and
-/// sends a METHOD selection message:
-///
-///                       +----+--------+
-///                       |VER | METHOD |
-///                       +----+--------+
-///                       | 1  |   1    |
-///                       +----+--------+
-///
-/// If the selected METHOD is X'FF', none of the methods listed by the
-/// client are acceptable, and the client MUST close the connection.
-///
-/// The values currently defined for METHOD are:
-///
-///        o  X'00' NO AUTHENTICATION REQUIRED
-///        o  X'01' GSSAPI
-///        o  X'02' USERNAME/PASSWORD
-///        o  X'03' to X'7F' IANA ASSIGNED
-///        o  X'80' to X'FE' RESERVED FOR PRIVATE METHODS
-///        o  X'FF' NO ACCEPTABLE METHODS
-///
-/// The client and server then enter a method-specific sub-negotiation.
-/// Descriptions of the method-dependent sub-negotiations appear in
-/// separate memos.
-///
-/// Developers of new METHOD support for this protocol should contact
-/// IANA for a METHOD number.  The ASSIGNED NUMBERS document should be
-/// referred to for a current list of METHOD numbers and their
-/// corresponding protocols.
-/// ```
-struct AuthResponse {
+/// Response packet from server
+/// 	        VER 	REP 	DSTPORT 	DSTIP
+/// Byte Count 	1 	    1 	    2 	        4 
+struct InitResponse {
     ver: u8,
-    method: AuthMethod,
+    rep: u8,
+    pub dstport: [u8; 2],
+    pub dstip: [u8; 4],
 }
 
-impl AuthResponse {
+impl InitResponse {
     async fn read(stream: &mut TcpStream) -> Result<Self, Error> {
-        let mut buf = [0u8; 2];
+        let mut buf = [0u8; 8];
         stream.read_exact(&mut buf).await?;
         let ver = buf[0];
-        let method = AuthMethod::try_from(buf[1])?;
-        if ver != consts::SOCKS5_VERSION {
+        let rep = buf[1];
+        let dstport = [buf[2],buf[3]];
+        let dstip = [buf[4],buf[5],buf[6],buf[7]];
+        if ver != consts::NULL_TERMINATED {
             Err(Error::NotSupportedSocksVersion(ver))
         } else {
-            match method {
-                AuthMethod::NoAuth | AuthMethod::Plain => Ok(AuthResponse { ver, method }),
-                AuthMethod::GssApi => Err(Error::Unimplement),
-                AuthMethod::NoAccept => Err(Error::MethodNotAccept),
+            match rep {
+                SOCKS4_REQUEST_GRANTED => Ok(InitResponse { ver, rep, dstport, dstip }),
+                SOCKS4_REQUEST_REJECTED_FAILED => Err(Error::RequestReject),
+                SOCKS4_REQUEST_FAILED_NOT_RUNNING_IDENTD => Err(Error::RequestFailedIdentd),
+                SOCKS4_REQUEST_FAILED_NOT_CONFIRM_USERID => Err(Error::RequestFailedUserID),
+                _ => Err(Error::RequestWrong),
             }
-        }
-    }
-
-    fn check(&self, method: AuthMethod) -> Result<(), Error> {
-        if self.method != method {
-            Err(Error::MethodWrong)
-        } else if self.ver != consts::SOCKS5_VERSION {
-            Err(Error::NotSupportedSocksVersion(self.ver))
-        } else {
-            Ok(())
         }
     }
 }
