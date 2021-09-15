@@ -76,4 +76,6 @@ pub enum Error {
     RequestFailedUserID,
     #[error("Wrong request")]
     RequestWrong,
+    #[error("No IpV4 address")]
+    NoIpV4Address,
 }
