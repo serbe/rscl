@@ -1,11 +1,8 @@
-use std::{
-    convert::{From, TryFrom},
-    u8,
-};
+use std::{convert::{From, TryFrom}, net::SocketAddr, u8};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use uri::{Addr, IntoUri, Uri};
+use uri::{IntoUri, Uri};
 
 use crate::{consts, Error};
 
@@ -66,9 +63,9 @@ struct InitRequest {
 
 impl InitRequest {
     fn new(target: &Uri) -> Result<Self, Error> {
-        let addr = target.addr()?;
+        let addr = target.socket_addr()?;
         match addr {
-            Addr::SocketAddrV4(addr) => {
+            SocketAddr::V4(addr) => {
                 let dstip = addr.ip().octets();
                 let dstport = addr.port().to_be_bytes();
                 Ok(InitRequest {
@@ -84,9 +81,9 @@ impl InitRequest {
         }
     }
 
-    fn set_command(&mut self, command: Command) {
-        self.cmd = command.into();
-    }
+    // fn set_command(&mut self, command: Command) {
+    //     self.cmd = command.into();
+    // }
 
     fn to_vec(&self) -> Vec<u8> {
         let mut buf = vec![self.ver, self.cmd];
@@ -108,6 +105,7 @@ impl InitRequest {
 /// Response packet from server
 /// 	        VER 	REP 	DSTPORT 	DSTIP
 /// Byte Count 	1 	    1 	    2 	        4
+#[derive(Clone, Debug)]
 struct InitResponse {
     ver: u8,
     rep: u8,

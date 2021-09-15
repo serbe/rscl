@@ -3,7 +3,6 @@ pub mod error;
 pub mod socks4;
 pub mod socks5;
 
-// pub use addr::Addr;
 pub use error::Error;
 
 #[cfg(test)]
