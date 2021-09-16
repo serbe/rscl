@@ -1,4 +1,8 @@
-use std::{convert::{From, TryFrom}, net::SocketAddr, u8};
+use std::{
+    convert::{From, TryFrom},
+    net::SocketAddr,
+    u8,
+};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
