@@ -46,10 +46,10 @@ impl TryFrom<u8> for Command {
 /// includes in the request packet the IP address and the port number of the
 /// destination host, and userid, in the following format.
 ///
-/// 		        +-----+-----+---------+-------+--------+------+
-/// 		        | VER | CMD | DSTPORT | DSTIP |   ID   | NULL |
-/// 		        +-----+-----+---------+-------+--------+------+
-///  # of bytes:	   1     1       2        4    variable   1
+///                 +-----+-----+---------+-------+--------+------+
+///                 | VER | CMD | DSTPORT | DSTIP |   ID   | NULL |
+///                 +-----+-----+---------+-------+--------+------+
+///  # of bytes:       1     1       2        4    variable   1
 ///
 /// VN is the SOCKS version number, 0x04 for this version
 /// CD is the SOCKS command code and should be 1 for CONNECT request
@@ -107,8 +107,8 @@ impl InitRequest {
 }
 
 /// Response packet from server
-/// 	        VER 	REP 	DSTPORT 	DSTIP
-/// Byte Count 	1 	    1 	    2 	        4
+///             VER     REP     DSTPORT     DSTIP
+/// Byte Count   1       1         2          4
 #[derive(Clone, Debug)]
 struct InitResponse {
     ver: u8,
