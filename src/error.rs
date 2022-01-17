@@ -1,19 +1,17 @@
-use std::{io, net, string};
-
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("url error {0}")]
-    UrlParseError(#[from] uri::Error),
+    #[error("uri error {0}")]
+    UriError(#[from] uri::Error),
     #[error("Socks version: {0} not supported")]
     NotSupportedSocksVersion(u8),
     #[error("Version: {0} not supported")]
     NotSupportedVersion(u8),
     #[error("io error {0}")]
-    IO(#[from] io::Error),
+    Io(#[from] std::io::Error),
     #[error("string from utf8 error {0}")]
-    Utf8Error(#[from] string::FromUtf8Error),
+    Utf8Error(#[from] std::string::FromUtf8Error),
     #[error("Net address parse {0}")]
-    StdParseAddr(#[from] net::AddrParseError),
+    StdParseAddr(#[from] std::net::AddrParseError),
     #[error("Unimplement feature")]
     Unimplement,
     #[error("Auth method not accepted")]
@@ -32,12 +30,10 @@ pub enum Error {
     CommandUnknown(u8),
     #[error("Parse ip version 6")]
     ParseIPv6,
-    #[error("Parse address")]
-    ParseAddr,
     #[error("Parse host")]
     ParseHost,
-    #[error("Parse port: {0}")]
-    ParsePort(String),
+    #[error("Parse port")]
+    ParsePort,
     #[error("Unsupported scheme: {0}")]
     UnsupportedScheme(String),
     #[error("Empty scheme")]
@@ -68,8 +64,18 @@ pub enum Error {
     ReplyAddressTypeNotSupported,
     #[error("Reply unassigned: {0}")]
     ReplyUnassigned(u8),
-    #[error("No set username for url")]
+    #[error("No set username for uri")]
     BadUsername,
-    #[error("No set password for url")]
+    #[error("No set password for uri")]
     BadPassword,
+    #[error("Request rejected or failed")]
+    RequestReject,
+    #[error("Request failed because client is not running identd (or not reachable from server)")]
+    RequestFailedIdentd,
+    #[error("Request failed because client's identd could not confirm the user ID in the request")]
+    RequestFailedUserID,
+    #[error("Wrong request")]
+    RequestWrong,
+    #[error("No IpV4 address")]
+    NoIpV4Address,
 }
