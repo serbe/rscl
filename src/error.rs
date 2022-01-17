@@ -1,7 +1,7 @@
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("uri error {0}")]
-    UriError(#[from] uri::Error),
+    #[error("url error")]
+    UrlParseError(#[from] url::ParseError),
     #[error("Socks version: {0} not supported")]
     NotSupportedSocksVersion(u8),
     #[error("Version: {0} not supported")]

@@ -6,7 +6,7 @@ use std::{
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use uri::{IntoUri, Uri};
+use url::Url;
 
 use crate::{consts, Error};
 
@@ -66,8 +66,11 @@ struct InitRequest {
 }
 
 impl InitRequest {
-    fn new(target: &Uri) -> Result<Self, Error> {
-        let addr = target.socket_addr()?;
+    fn new(target: &Url) -> Result<Self, Error> {
+        let addr = target
+            .socket_addrs(|| None)?
+            .pop()
+            .ok_or(Error::SocketAddr)?;
         match addr {
             SocketAddr::V4(addr) => {
                 let dstip = addr.ip().octets();
@@ -144,10 +147,13 @@ impl InitResponse {
     }
 }
 
-pub async fn connect<P: IntoUri, T: IntoUri>(proxy: P, target: T) -> Result<TcpStream, Error> {
-    let proxy = &proxy.into_uri()?;
-    let target = &target.into_uri()?;
-    let socket_addr = proxy.socket_addr()?;
+pub async fn connect(proxy: &str, target: &str) -> Result<TcpStream, Error> {
+    let proxy: &Url = &proxy.try_into()?;
+    let target = &target.try_into()?;
+    let socket_addr = proxy
+        .socket_addrs(|| None)?
+        .pop()
+        .ok_or(Error::SocketAddr)?;
     let mut stream = TcpStream::connect(socket_addr).await?;
 
     InitRequest::new(target)?.send(&mut stream).await?;
