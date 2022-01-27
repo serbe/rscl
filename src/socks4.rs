@@ -121,23 +121,22 @@ struct InitResponse {
 }
 
 impl InitResponse {
-    async fn read(stream: &mut TcpStream) -> Result<Self, Error> {
+    async fn read(stream: &mut TcpStream) -> Result<InitResponse, Error> {
         let mut buf = [0u8; 8];
         stream.read_exact(&mut buf).await?;
         let ver = buf[0];
         let rep = buf[1];
         let dstport = [buf[2], buf[3]];
         let dstip = [buf[4], buf[5], buf[6], buf[7]];
-        if ver != consts::NULL_TERMINATED {
-            Err(Error::NotSupportedSocksVersion(ver))
+        Ok(InitResponse{ver, rep, dstport, dstip})
+    }
+
+    fn check(&self) -> Result<(), Error> {
+        if self.ver != consts::NULL_TERMINATED {
+            Err(Error::NotSupportedSocksVersion(self.ver))
         } else {
-            match rep {
-                consts::SOCKS4_REQUEST_GRANTED => Ok(InitResponse {
-                    ver,
-                    rep,
-                    dstport,
-                    dstip,
-                }),
+            match self.rep {
+                consts::SOCKS4_REQUEST_GRANTED => Ok(()),
                 consts::SOCKS4_REQUEST_REJECTED_FAILED => Err(Error::RequestReject),
                 consts::SOCKS4_REQUEST_FAILED_NOT_RUNNING_IDENTD => Err(Error::RequestFailedIdentd),
                 consts::SOCKS4_REQUEST_FAILED_NOT_CONFIRM_USERID => Err(Error::RequestFailedUserID),
@@ -157,7 +156,8 @@ pub async fn connect(proxy: &str, target: &str) -> Result<TcpStream, Error> {
     let mut stream = TcpStream::connect(socket_addr).await?;
 
     InitRequest::new(target)?.send(&mut stream).await?;
-    InitResponse::read(&mut stream).await?;
+    let init_response = InitResponse::read(&mut stream).await?;
+    init_response.check()?;
 
     Ok(stream)
 }
