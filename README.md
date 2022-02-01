@@ -1,2 +1,3 @@
-# rsl
-rsl
+# rscl
+
+Rust SOCKS client library
