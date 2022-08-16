@@ -10,7 +10,7 @@ use url::{Host, Url};
 
 use crate::{consts, Error};
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Command {
     TcpConnection,
     TcpBinding,
@@ -40,7 +40,7 @@ impl TryFrom<u8> for Command {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AuthMethod {
     NoAuth,
     GssApi,
@@ -465,7 +465,7 @@ impl SocksReplies {
         if self.ver != consts::SOCKS5_VERSION {
             return Err(Error::NotSupportedSocksVersion(self.ver));
         }
-        let _ = check_reply(self.rep)?;
+        check_reply(self.rep)?;
         if self.rsv != 0u8 {
             return Err(Error::WrongReserved(self.rsv));
         }
@@ -484,6 +484,7 @@ impl SocksReplies {
                 let mut buf = [0u8];
                 stream.read_exact(&mut buf).await?;
                 let mut buf = Vec::with_capacity(buf[0] as usize);
+                buf.resize(buf[0] as usize, 0);
                 stream.read_exact(&mut buf).await?;
                 let host = String::from_utf8(buf)?;
                 Ok(Host::Domain(host))

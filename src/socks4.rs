@@ -10,7 +10,7 @@ use url::Url;
 
 use crate::{consts, Error};
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Command {
     TcpConnection,
     TcpBinding,
@@ -128,7 +128,12 @@ impl InitResponse {
         let rep = buf[1];
         let dstport = [buf[2], buf[3]];
         let dstip = [buf[4], buf[5], buf[6], buf[7]];
-        Ok(InitResponse{ver, rep, dstport, dstip})
+        Ok(InitResponse {
+            ver,
+            rep,
+            dstport,
+            dstip,
+        })
     }
 
     fn check(&self) -> Result<(), Error> {
