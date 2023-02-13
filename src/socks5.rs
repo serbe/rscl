@@ -4,7 +4,7 @@ use std::{
     u8,
 };
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use url::{Host, Url};
 
@@ -127,9 +127,12 @@ impl InitRequest {
     }
 
     // Send auth request to server
-    async fn send(&self, stream: &mut TcpStream) -> Result<(), Error> {
+    async fn send<Writer>(&self, mut writer: Writer) -> Result<(), Error>
+    where
+        Writer: AsyncWrite + Unpin,
+    {
         let buf = self.to_vec();
-        stream.write_all(&buf).await?;
+        writer.write_all(&buf).await?;
         Ok(())
     }
 }
@@ -173,9 +176,12 @@ struct AuthResponse {
 }
 
 impl AuthResponse {
-    async fn read(stream: &mut TcpStream) -> Result<Self, Error> {
+    async fn read<Reader>(mut reader: Reader) -> Result<Self, Error>
+    where
+        Reader: AsyncRead + Unpin,
+    {
         let mut buf = [0u8; 2];
-        stream.read_exact(&mut buf).await?;
+        reader.read_exact(&mut buf).await?;
         let ver = buf[0];
         let method = AuthMethod::try_from(buf[1])?;
         if ver != consts::SOCKS5_VERSION {
@@ -255,9 +261,12 @@ impl UserPassRequest {
         buf
     }
 
-    async fn send(&self, stream: &mut TcpStream) -> Result<(), Error> {
+    async fn send<Writer>(&self, mut writer: Writer) -> Result<(), Error>
+    where
+        Writer: AsyncWrite + Unpin,
+    {
         let buf = self.to_vec();
-        stream.write_all(&buf).await?;
+        writer.write_all(&buf).await?;
         Ok(())
     }
 }
@@ -284,9 +293,12 @@ struct UserPassResponse {
 }
 
 impl UserPassResponse {
-    async fn read(stream: &mut TcpStream) -> Result<UserPassResponse, Error> {
+    async fn read<Reader>(mut reader: Reader) -> Result<UserPassResponse, Error>
+    where
+        Reader: AsyncRead + Unpin,
+    {
         let mut buf = [0u8; 2];
-        stream.read_exact(&mut buf).await?;
+        reader.read_exact(&mut buf).await?;
         Ok(UserPassResponse {
             ver: buf[0],
             status: buf[1],
@@ -388,9 +400,12 @@ impl SocksRequest {
         }
     }
 
-    async fn send(&self, stream: &mut TcpStream) -> Result<(), Error> {
+    async fn send<Writer>(&self, mut writer: Writer) -> Result<(), Error>
+    where
+        Writer: AsyncWrite + Unpin,
+    {
         let buf = self.to_vec();
-        stream.write_all(&buf).await?;
+        writer.write_all(&buf).await?;
         Ok(())
     }
 }
@@ -450,9 +465,12 @@ struct SocksReplies {
 }
 
 impl SocksReplies {
-    async fn read(stream: &mut TcpStream) -> Result<SocksReplies, Error> {
+    async fn read<Reader>(mut reader: Reader) -> Result<SocksReplies, Error>
+    where
+        Reader: AsyncRead + Unpin,
+    {
         let mut buf = [0u8; 4];
-        stream.read_exact(&mut buf).await?;
+        reader.read_exact(&mut buf).await?;
         Ok(SocksReplies {
             ver: buf[0],
             rep: buf[1],
@@ -461,7 +479,10 @@ impl SocksReplies {
         })
     }
 
-    async fn get_addr(&self, stream: &mut TcpStream) -> Result<ServerBound, Error> {
+    async fn get_addr<Reader>(&self, mut reader: Reader) -> Result<ServerBound, Error>
+    where
+        Reader: AsyncRead + Unpin,
+    {
         if self.ver != consts::SOCKS5_VERSION {
             return Err(Error::NotSupportedSocksVersion(self.ver));
         }
@@ -472,26 +493,26 @@ impl SocksReplies {
         let addr = match self.atyp {
             consts::SOCKS5_ADDRESS_TYPE_IPV4 => {
                 let mut buf = [0u8; 4];
-                stream.read_exact(&mut buf).await?;
+                reader.read_exact(&mut buf).await?;
                 Ok(Host::Ipv4(Ipv4Addr::from(buf)))
             }
             consts::SOCKS5_ADDRESS_TYPE_IPV6 => {
                 let mut buf = [0u8; 16];
-                stream.read_exact(&mut buf).await?;
+                reader.read_exact(&mut buf).await?;
                 Ok(Host::Ipv6(Ipv6Addr::from(buf)))
             }
             consts::SOCKS5_ADDRESS_TYPE_DOMAINNAME => {
                 let mut buf = [0u8];
-                stream.read_exact(&mut buf).await?;
+                reader.read_exact(&mut buf).await?;
                 let mut buf = Vec::with_capacity(buf[0] as usize);
                 buf.resize(buf[0] as usize, 0);
-                stream.read_exact(&mut buf).await?;
+                reader.read_exact(&mut buf).await?;
                 let host = String::from_utf8(buf)?;
                 Ok(Host::Domain(host))
             }
             u => Err(Error::AddressTypeNotSupported(u)),
         }?;
-        let port = stream.read_u16().await?;
+        let port = reader.read_u16().await?;
         Ok(ServerBound { addr, port })
     }
 }

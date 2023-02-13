@@ -46,11 +46,11 @@ impl TryFrom<u8> for Command {
 /// includes in the request packet the IP address and the port number of the
 /// destination host, and userid, in the following format.
 ///
-///                 +-----+-----+---------+-------+--------+------+
-///                 | VER | CMD | DSTPORT | DSTIP |   ID   | NULL |
-///                 +-----+-----+---------+-------+--------+------+
-///  # of bytes:       1     1       2        4    variable   1
-///
+/// +-----+-----+---------+-------+--------+------+
+/// | VER | CMD | DSTPORT | DSTIP |   ID   | NULL |
+/// +-----+-----+---------+-------+--------+------+
+/// |  1     1       2        4    variable   1
+/// # of bytes:       
 /// VN is the SOCKS version number, 0x04 for this version
 /// CD is the SOCKS command code and should be 1 for CONNECT request
 /// ID is the user ID string, variable length, null-terminated.
@@ -116,8 +116,8 @@ impl InitRequest {
 struct InitResponse {
     ver: u8,
     rep: u8,
-    pub dstport: [u8; 2],
-    pub dstip: [u8; 4],
+    // pub dstport: [u8; 2],
+    // pub dstip: [u8; 4],
 }
 
 impl InitResponse {
@@ -126,13 +126,13 @@ impl InitResponse {
         stream.read_exact(&mut buf).await?;
         let ver = buf[0];
         let rep = buf[1];
-        let dstport = [buf[2], buf[3]];
-        let dstip = [buf[4], buf[5], buf[6], buf[7]];
+        // let dstport = [buf[2], buf[3]];
+        // let dstip = [buf[4], buf[5], buf[6], buf[7]];
         Ok(InitResponse {
             ver,
             rep,
-            dstport,
-            dstip,
+            // dstport,
+            // dstip,
         })
     }
 
