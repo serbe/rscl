@@ -1,14 +1,160 @@
 use std::{
     convert::{From, TryFrom},
     net::{Ipv4Addr, Ipv6Addr},
+    pin::Pin,
+    task::Poll,
+    time::Duration,
     u8,
 };
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::time::timeout;
 use url::{Host, Url};
 
 use crate::{consts, Error};
+
+pub struct Config {
+    pub proxy: Url,
+    pub target: Url,
+    pub auth: Vec<AuthMethod>,
+    pub cmd: Command,
+    pub timeout: Option<u64>,
+}
+
+pub struct SocksClient<S>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    pub stream: S,
+    pub config: Config,
+}
+
+impl<S> SocksClient<S>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    pub async fn new(config: Config) -> Result<SocksClient<TcpStream>, Error> {
+        let socket_addr = config
+            .proxy
+            .socket_addrs(|| None)?
+            .pop()
+            .ok_or(Error::SocketAddr)?;
+        let stream = if let Some(time) = config.timeout {
+            let timeout = timeout(Duration::from_secs(time), TcpStream::connect(socket_addr)).await;
+            match timeout {
+                Ok(fut) => Ok(fut?),
+                Err(_) => Err(Error::NoSetTimeout),
+            }
+        } else {
+            Ok(TcpStream::connect(socket_addr).await?)
+        }?;
+        let mut client = SocksClient { stream, config };
+        client.init_request().await?;
+        client.auth_response().await?;
+        client.socks_request().await?;
+        client.socks_replies().await?;
+        Ok(client)
+    }
+
+    async fn init_request(&mut self) -> Result<(), Error> {
+        InitRequest::new(&self.config.auth)
+            .send(&mut self.stream)
+            .await
+    }
+
+    async fn auth_response(&mut self) -> Result<(), Error> {
+        AuthResponse::read(&mut self.stream)
+            .await?
+            .check(&self.config.auth)?;
+        if self.config.auth.contains(&AuthMethod::Plain) {
+            let password = self
+                .config
+                .proxy
+                .password()
+                .map_or(String::new(), |v| v.to_string());
+            UserPassRequest::new(self.config.proxy.username(), &password)?
+                .send(&mut self.stream)
+                .await?;
+            UserPassResponse::read(&mut self.stream).await?.check()?;
+        }
+        Ok(())
+    }
+
+    async fn socks_request(&mut self) -> Result<(), Error> {
+        SocksRequest::new(self.config.cmd, &self.config.target)?
+            .send(&mut self.stream)
+            .await
+    }
+
+    async fn socks_replies(&mut self) -> Result<ServerBound, Error> {
+        SocksReplies::read(&mut self.stream)
+            .await?
+            .get_addr(&mut self.stream)
+            .await
+    }
+
+    // pub async fn connect(proxy: &str, target: &str) -> Result<SocksClient<S>, Error> {
+    //     connect_uri(&proxy.parse()?, &target.parse()?).await
+    // }
+
+    // pub async fn connect_plain(
+    //     proxy: &str,
+    //     target: &str,
+    //     username: &str,
+    //     password: &str,
+    // ) -> Result<TcpStream, Error> {
+    //     let mut proxy: Url = proxy.try_into()?;
+    //     proxy
+    //         .set_username(username)
+    //         .map_err(|_| Error::BadUsername)?;
+    //     proxy
+    //         .set_password(Some(password))
+    //         .map_err(|_| Error::BadPassword)?;
+    //     connect_uri(&proxy, &target.try_into()?).await
+    // }
+}
+
+impl<S> AsyncRead for SocksClient<S>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        context: &mut std::task::Context,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.stream).poll_read(context, buf)
+    }
+}
+
+/// Allow us to write directly into the struct
+impl<S> AsyncWrite for SocksClient<S>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        context: &mut std::task::Context,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.stream).poll_write(context, buf)
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        context: &mut std::task::Context,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.stream).poll_flush(context)
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        context: &mut std::task::Context,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.stream).poll_shutdown(context)
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Command {
@@ -97,14 +243,6 @@ struct InitRequest {
 }
 
 impl InitRequest {
-    fn default() -> Self {
-        InitRequest {
-            ver: consts::SOCKS5_VERSION,
-            nmethods: 0u8,
-            methods: Vec::new(),
-        }
-    }
-
     fn add_method(&mut self, method: AuthMethod) {
         if !self.methods.contains(&method) {
             self.nmethods += 1;
@@ -112,10 +250,12 @@ impl InitRequest {
         }
     }
 
-    fn new(method: AuthMethod) -> Self {
-        let mut auth_request = InitRequest::default();
-        auth_request.add_method(method);
-        auth_request
+    fn new(methods: &[AuthMethod]) -> Self {
+        InitRequest {
+            ver: consts::SOCKS5_VERSION,
+            nmethods: methods.len() as u8,
+            methods: Vec::new(),
+        }
     }
 
     fn to_vec(&self) -> Vec<u8> {
@@ -195,8 +335,8 @@ impl AuthResponse {
         }
     }
 
-    fn check(&self, method: AuthMethod) -> Result<(), Error> {
-        if self.method != method {
+    fn check(&self, method: &[AuthMethod]) -> Result<(), Error> {
+        if !method.contains(&self.method) {
             Err(Error::MethodWrong)
         } else if self.ver != consts::SOCKS5_VERSION {
             Err(Error::NotSupportedSocksVersion(self.ver))
@@ -532,58 +672,38 @@ fn check_reply(value: u8) -> Result<(), Error> {
     }
 }
 
-pub async fn connect(proxy: &str, target: &str) -> Result<TcpStream, Error> {
-    connect_uri(&proxy.try_into()?, &target.try_into()?).await
-}
-
-pub async fn connect_plain(
-    proxy: &str,
-    target: &str,
-    username: &str,
-    password: &str,
-) -> Result<TcpStream, Error> {
-    let mut proxy: Url = proxy.try_into()?;
-    proxy
-        .set_username(username)
-        .map_err(|_| Error::BadUsername)?;
-    proxy
-        .set_password(Some(password))
-        .map_err(|_| Error::BadPassword)?;
-    connect_uri(&proxy, &target.try_into()?).await
-}
-
-pub async fn connect_uri(proxy: &Url, target: &Url) -> Result<TcpStream, Error> {
-    let socket_addr = proxy
-        .socket_addrs(|| None)?
-        .pop()
-        .ok_or(Error::SocketAddr)?;
-    let mut stream = TcpStream::connect(socket_addr).await?;
-    if !proxy.username().is_empty() {
-        let password = proxy.password().map_or(String::new(), |v| v.to_string());
-        InitRequest::new(AuthMethod::Plain)
-            .send(&mut stream)
-            .await?;
-        AuthResponse::read(&mut stream)
-            .await?
-            .check(AuthMethod::Plain)?;
-        UserPassRequest::new(proxy.username(), &password)?
-            .send(&mut stream)
-            .await?;
-        UserPassResponse::read(&mut stream).await?.check()?;
-    } else {
-        InitRequest::new(AuthMethod::NoAuth)
-            .send(&mut stream)
-            .await?;
-        AuthResponse::read(&mut stream)
-            .await?
-            .check(AuthMethod::NoAuth)?;
-    }
-    SocksRequest::new(Command::TcpConnection, target)?
-        .send(&mut stream)
-        .await?;
-    SocksReplies::read(&mut stream)
-        .await?
-        .get_addr(&mut stream)
-        .await?;
-    Ok(stream)
-}
+// pub async fn connect_uri(proxy: &Url, target: &Url) -> Result<TcpStream, Error> {
+//     let socket_addr = proxy
+//         .socket_addrs(|| None)?
+//         .pop()
+//         .ok_or(Error::SocketAddr)?;
+//     let mut stream = TcpStream::connect(socket_addr).await?;
+//     if !proxy.username().is_empty() {
+//         let password = proxy.password().map_or(String::new(), |v| v.to_string());
+//         InitRequest::new(AuthMethod::Plain)
+//             .send(&mut stream)
+//             .await?;
+//         AuthResponse::read(&mut stream)
+//             .await?
+//             .check(AuthMethod::Plain)?;
+//         UserPassRequest::new(proxy.username(), &password)?
+//             .send(&mut stream)
+//             .await?;
+//         UserPassResponse::read(&mut stream).await?.check()?;
+//     } else {
+//         InitRequest::new(AuthMethod::NoAuth)
+//             .send(&mut stream)
+//             .await?;
+//         AuthResponse::read(&mut stream)
+//             .await?
+//             .check(AuthMethod::NoAuth)?;
+//     }
+//     SocksRequest::new(Command::TcpConnection, target)?
+//         .send(&mut stream)
+//         .await?;
+//     SocksReplies::read(&mut stream)
+//         .await?
+//         .get_addr(&mut stream)
+//         .await?;
+//     Ok(stream)
+// }

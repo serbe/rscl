@@ -78,4 +78,6 @@ pub enum Error {
     RequestWrong,
     #[error("No IpV4 address")]
     NoIpV4Address,
+    #[error("No set timeout to TcpStream")]
+    NoSetTimeout,
 }
