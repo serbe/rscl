@@ -35,37 +35,11 @@ async fn test_client() {
         _ => return,
     };
 
-    let config = Config {
-        auth: vec![AuthMethod::NoAuth],
-        proxy: proxy.parse().unwrap(),
-        target: SIMPLE_URL.parse().unwrap(),
-        cmd: Command::TcpConnection,
-        timeout: None,
-    };
-
-    let socket_addr = config
-        .proxy
-        .socket_addrs(|| None)
-        .unwrap()
-        .pop()
-        .ok_or(Error::SocketAddr)
+    let mut client = SocksClient::new(proxy.parse().unwrap(), SIMPLE_URL.parse().unwrap())
+        .await
         .unwrap();
 
-    let stream = if let Some(time) = config.timeout {
-        let timeout = timeout(Duration::from_secs(time), TcpStream::connect(socket_addr)).await;
-        match timeout {
-            Ok(fut) => Ok(fut.unwrap()),
-            Err(_) => Err(Error::NoSetTimeout),
-        }
-    } else {
-        Ok(TcpStream::connect(socket_addr).await.unwrap())
-    }
-    .unwrap();
-    let mut client = SocksClient { stream, config };
-    client.init_request().await.unwrap();
-    client.auth_response().await.unwrap();
-    client.socks_request().await.unwrap();
-    client.socks_replies().await.unwrap();
+    client.connect().await.unwrap();
 
     client
         .stream

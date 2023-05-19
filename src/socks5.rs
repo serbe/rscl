@@ -15,6 +15,7 @@ use url::{Host, Url};
 
 use crate::{consts, Error};
 
+#[derive(Debug)]
 pub struct Config {
     pub proxy: Url,
     pub target: Url,
@@ -22,18 +23,6 @@ pub struct Config {
     pub cmd: Command,
     pub timeout: Option<u64>,
 }
-
-// impl Default for Config {
-//     fn default() -> Self {
-//         Config {
-//             proxy: Url,
-//             target: Url,
-//             auth: vec![AuthMethod::NoAuth],
-//             cmd: Command::TcpConnection,
-//             timeout: None,
-//         }
-//     }
-// }
 
 pub struct SocksClient<S>
 where
@@ -47,34 +36,12 @@ impl<S> SocksClient<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    pub async fn new(proxy: Url, target: Url) -> Result<SocksClient<TcpStream>, Error> {
-        let config = Config {
-            proxy,
-            target,
-            auth: vec![AuthMethod::NoAuth],
-            cmd: Command::TcpBinding,
-            timeout: None,
-        };
-        let socket_addr = config
-            .proxy
-            .socket_addrs(|| None)?
-            .pop()
-            .ok_or(Error::SocketAddr)?;
-        let stream = if let Some(time) = config.timeout {
-            let timeout = timeout(Duration::from_secs(time), TcpStream::connect(socket_addr)).await;
-            match timeout {
-                Ok(fut) => Ok(fut?),
-                Err(_) => Err(Error::NoSetTimeout),
-            }
-        } else {
-            Ok(TcpStream::connect(socket_addr).await?)
-        }?;
-        let mut client = SocksClient { stream, config };
-        client.init_request().await?;
-        client.auth_response().await?;
-        client.socks_request().await?;
-        client.socks_replies().await?;
-        Ok(client)
+    pub async fn connect(&mut self) -> Result<(), Error> {
+        self.init_request().await?;
+        self.auth_response().await?;
+        self.socks_request().await?;
+        self.socks_replies().await?;
+        Ok(())
     }
 
     pub async fn init_request(&mut self) -> Result<(), Error> {
@@ -133,6 +100,39 @@ where
     //         .map_err(|_| Error::BadPassword)?;
     //     connect_uri(&proxy, &target.try_into()?).await
     // }
+}
+
+impl SocksClient<TcpStream> {
+    pub async fn new(proxy: Url, target: Url) -> Result<SocksClient<TcpStream>, Error> {
+        let mut auth = vec![AuthMethod::NoAuth];
+        if !proxy.username().is_empty() {
+            auth.push(AuthMethod::Plain)
+        };
+
+        let config = Config {
+            proxy,
+            target,
+            auth,
+            cmd: Command::TcpConnection,
+            timeout: None,
+        };
+        debug!("SocksClient::new config: {:?}", &config);
+        let socket_addr = config
+            .proxy
+            .socket_addrs(|| None)?
+            .pop()
+            .ok_or(Error::SocketAddr)?;
+        let stream = if let Some(time) = config.timeout {
+            let timeout = timeout(Duration::from_secs(time), TcpStream::connect(socket_addr)).await;
+            match timeout {
+                Ok(fut) => Ok(fut?),
+                Err(_) => Err(Error::NoSetTimeout),
+            }
+        } else {
+            Ok(TcpStream::connect(socket_addr).await?)
+        }?;
+        Ok(SocksClient { stream, config })
+    }
 }
 
 impl<S> AsyncRead for SocksClient<S>
@@ -258,33 +258,25 @@ impl TryFrom<u8> for AuthMethod {
 #[derive(Clone, Debug)]
 struct InitRequest {
     pub ver: u8,
-    pub nmethods: u8,
     pub methods: Vec<AuthMethod>,
 }
 
 impl InitRequest {
-    fn add_method(&mut self, method: AuthMethod) {
-        debug!("InitRequest::add_method {:?}", method);
-        if !self.methods.contains(&method) {
-            self.nmethods += 1;
-            self.methods.push(method);
-        }
-        debug!(
-            "InitRequest self - num methods {}, methods: {:?} ",
-            self.nmethods, self.methods
-        );
-    }
-
     fn new(methods: &[AuthMethod]) -> Self {
         InitRequest {
             ver: consts::SOCKS5_VERSION,
-            nmethods: methods.len() as u8,
             methods: methods.to_vec(),
         }
     }
 
     fn to_vec(&self) -> Vec<u8> {
-        let mut buf = vec![self.ver, self.nmethods];
+        debug!(
+            "InitRequest::to_vec ver: {}, nmethods: {}, methods: {:?}",
+            &self.ver,
+            &self.methods.len(),
+            &self.methods
+        );
+        let mut buf = vec![self.ver, self.methods.len() as u8];
         for method in &self.methods {
             buf.push((*method).into());
         }
@@ -293,10 +285,7 @@ impl InitRequest {
     }
 
     // Send auth request to server
-    async fn send<Writer>(&self, mut writer: Writer) -> Result<(), Error>
-    where
-        Writer: AsyncWrite + Unpin,
-    {
+    async fn send<W: AsyncWrite + Unpin>(&self, mut writer: W) -> Result<(), Error> {
         let buf = self.to_vec();
         debug!("InitRequest::send buf: {:?}", &buf);
         writer.write_all(&buf).await?;
@@ -343,10 +332,7 @@ struct AuthResponse {
 }
 
 impl AuthResponse {
-    async fn read<Reader>(mut reader: Reader) -> Result<Self, Error>
-    where
-        Reader: AsyncRead + Unpin,
-    {
+    async fn read<R: AsyncRead + Unpin>(mut reader: R) -> Result<Self, Error> {
         let mut buf = [0u8; 2];
         reader.read_exact(&mut buf).await?;
         let ver = buf[0];
@@ -422,6 +408,10 @@ impl UserPassRequest {
     }
 
     fn to_vec(&self) -> Vec<u8> {
+        debug!(
+            "UserPassRequest::to_vec ver: {}, ulen: {}, uname: {:?}, passwd: {:?}",
+            self.ver, self.ulen, &self.uname, &self.passwd
+        );
         let mut buf = vec![self.ver, self.ulen as u8];
         buf.extend_from_slice(&self.uname);
         buf.push(self.plen as u8);
@@ -429,10 +419,7 @@ impl UserPassRequest {
         buf
     }
 
-    async fn send<Writer>(&self, mut writer: Writer) -> Result<(), Error>
-    where
-        Writer: AsyncWrite + Unpin,
-    {
+    async fn send<W: AsyncWrite + Unpin>(&self, mut writer: W) -> Result<(), Error> {
         let buf = self.to_vec();
         debug!("UserPassRequest::send buf: {:?}", &buf);
         writer.write_all(&buf).await?;
@@ -462,10 +449,7 @@ struct UserPassResponse {
 }
 
 impl UserPassResponse {
-    async fn read<Reader>(mut reader: Reader) -> Result<UserPassResponse, Error>
-    where
-        Reader: AsyncRead + Unpin,
-    {
+    async fn read<R: AsyncRead + Unpin>(mut reader: R) -> Result<Self, Error> {
         let mut buf = [0u8; 2];
         reader.read_exact(&mut buf).await?;
         debug!(
@@ -542,6 +526,10 @@ impl SocksRequest {
     }
 
     fn to_vec(&self) -> Vec<u8> {
+        debug!(
+            "SocksRequest::to_vec ver: {}, cmd: {:?}, rsv: {}, host_addr_type: {}, dst_addr: {}, dst_port: {}",
+            &self.ver, &self.cmd, &self.rsv, &self.host_addr_type(), &self.dst_addr, &self.dst_port
+        );
         let mut buf = vec![self.ver, self.cmd.into(), self.rsv, self.host_addr_type()];
         for byte in self.host_to_vec() {
             buf.push(byte);
@@ -573,10 +561,7 @@ impl SocksRequest {
         }
     }
 
-    async fn send<Writer>(&self, mut writer: Writer) -> Result<(), Error>
-    where
-        Writer: AsyncWrite + Unpin,
-    {
+    async fn send<W: AsyncWrite + Unpin>(&self, mut writer: W) -> Result<(), Error> {
         let buf = self.to_vec();
         debug!("SocksRequest::send buf: {:?}", &buf);
         writer.write_all(&buf).await?;
@@ -639,10 +624,7 @@ struct SocksReplies {
 }
 
 impl SocksReplies {
-    async fn read<Reader>(mut reader: Reader) -> Result<SocksReplies, Error>
-    where
-        Reader: AsyncRead + Unpin,
-    {
+    async fn read<R: AsyncRead + Unpin>(mut reader: R) -> Result<Self, Error> {
         let mut buf = [0u8; 4];
         reader.read_exact(&mut buf).await?;
         debug!(
@@ -657,10 +639,7 @@ impl SocksReplies {
         })
     }
 
-    async fn get_addr<Reader>(&self, mut reader: Reader) -> Result<ServerBound, Error>
-    where
-        Reader: AsyncRead + Unpin,
-    {
+    async fn get_addr<R: AsyncRead + Unpin>(&self, mut reader: R) -> Result<ServerBound, Error> {
         if self.ver != consts::SOCKS5_VERSION {
             return Err(Error::NotSupportedSocksVersion(self.ver));
         }
@@ -691,6 +670,10 @@ impl SocksReplies {
             u => Err(Error::AddressTypeNotSupported(u)),
         }?;
         let port = reader.read_u16().await?;
+        debug!(
+            "SocksReplies::get_addr ServerBound addr: {}, port: {}",
+            &addr, &port
+        );
         Ok(ServerBound { addr, port })
     }
 }
