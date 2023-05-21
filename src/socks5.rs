@@ -3,14 +3,12 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr},
     pin::Pin,
     task::Poll,
-    time::Duration,
     u8,
 };
 
 use log::debug;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::time::timeout;
 use url::{Host, Url};
 
 use crate::{consts, Error};
@@ -21,7 +19,6 @@ pub struct Config {
     pub target: Url,
     pub auth: Vec<AuthMethod>,
     pub cmd: Command,
-    pub timeout: Option<u64>,
 }
 
 pub struct SocksClient<S>
@@ -36,7 +33,7 @@ impl<S> SocksClient<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    pub async fn connect(&mut self) -> Result<(), Error> {
+    pub async fn handshake(&mut self) -> Result<(), Error> {
         self.init_request().await?;
         self.auth_response().await?;
         self.socks_request().await?;
@@ -80,26 +77,6 @@ where
             .get_addr(&mut self.stream)
             .await
     }
-
-    // pub async fn connect(proxy: &str, target: &str) -> Result<SocksClient<S>, Error> {
-    //     connect_uri(&proxy.parse()?, &target.parse()?).await
-    // }
-
-    // pub async fn connect_plain(
-    //     proxy: &str,
-    //     target: &str,
-    //     username: &str,
-    //     password: &str,
-    // ) -> Result<TcpStream, Error> {
-    //     let mut proxy: Url = proxy.try_into()?;
-    //     proxy
-    //         .set_username(username)
-    //         .map_err(|_| Error::BadUsername)?;
-    //     proxy
-    //         .set_password(Some(password))
-    //         .map_err(|_| Error::BadPassword)?;
-    //     connect_uri(&proxy, &target.try_into()?).await
-    // }
 }
 
 impl SocksClient<TcpStream> {
@@ -114,7 +91,6 @@ impl SocksClient<TcpStream> {
             target,
             auth,
             cmd: Command::TcpConnection,
-            timeout: None,
         };
         debug!("SocksClient::new config: {:?}", &config);
         let socket_addr = config
@@ -122,16 +98,36 @@ impl SocksClient<TcpStream> {
             .socket_addrs(|| None)?
             .pop()
             .ok_or(Error::SocketAddr)?;
-        let stream = if let Some(time) = config.timeout {
-            let timeout = timeout(Duration::from_secs(time), TcpStream::connect(socket_addr)).await;
-            match timeout {
-                Ok(fut) => Ok(fut?),
-                Err(_) => Err(Error::NoSetTimeout),
-            }
-        } else {
-            Ok(TcpStream::connect(socket_addr).await?)
-        }?;
+        let stream = TcpStream::connect(socket_addr).await?;
         Ok(SocksClient { stream, config })
+    }
+
+    pub async fn connect(proxy: &str, target: &str) -> Result<Self, Error> {
+        let mut client = SocksClient::new(proxy.parse()?, target.parse()?).await?;
+        client.handshake().await?;
+        Ok(client)
+    }
+
+    pub async fn connect_plain(
+        proxy: &str,
+        target: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<Self, Error> {
+        let mut proxy = proxy.parse::<Url>()?;
+        let password = match password.is_empty() {
+            true => None,
+            false => Some(password),
+        };
+        proxy
+            .set_username(username)
+            .map_err(|_| Error::BadUsername)?;
+        proxy
+            .set_password(password)
+            .map_err(|_| Error::BadPassword)?;
+        let mut client = SocksClient::new(proxy, target.parse()?).await?;
+        client.handshake().await?;
+        Ok(client)
     }
 }
 
@@ -148,7 +144,6 @@ where
     }
 }
 
-/// Allow us to write directly into the struct
 impl<S> AsyncWrite for SocksClient<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -692,39 +687,3 @@ fn check_reply(value: u8) -> Result<(), Error> {
         v => Err(Error::ReplyUnassigned(v)),
     }
 }
-
-// pub async fn connect_uri(proxy: &Url, target: &Url) -> Result<TcpStream, Error> {
-//     let socket_addr = proxy
-//         .socket_addrs(|| None)?
-//         .pop()
-//         .ok_or(Error::SocketAddr)?;
-//     let mut stream = TcpStream::connect(socket_addr).await?;
-//     if !proxy.username().is_empty() {
-//         let password = proxy.password().map_or(String::new(), |v| v.to_string());
-//         InitRequest::new(AuthMethod::Plain)
-//             .send(&mut stream)
-//             .await?;
-//         AuthResponse::read(&mut stream)
-//             .await?
-//             .check(AuthMethod::Plain)?;
-//         UserPassRequest::new(proxy.username(), &password)?
-//             .send(&mut stream)
-//             .await?;
-//         UserPassResponse::read(&mut stream).await?.check()?;
-//     } else {
-//         InitRequest::new(AuthMethod::NoAuth)
-//             .send(&mut stream)
-//             .await?;
-//         AuthResponse::read(&mut stream)
-//             .await?
-//             .check(AuthMethod::NoAuth)?;
-//     }
-//     SocksRequest::new(Command::TcpConnection, target)?
-//         .send(&mut stream)
-//         .await?;
-//     SocksReplies::read(&mut stream)
-//         .await?
-//         .get_addr(&mut stream)
-//         .await?;
-//     Ok(stream)
-// }
