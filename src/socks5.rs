@@ -33,6 +33,10 @@ impl<S> SocksClient<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    pub async fn from_stream(stream: S, config: Config) -> Result<Self, Error> {
+        Ok(SocksClient { stream, config })
+    }
+
     pub async fn handshake(&mut self) -> Result<(), Error> {
         self.init_request().await?;
         self.auth_response().await?;
@@ -99,7 +103,7 @@ impl SocksClient<TcpStream> {
             .pop()
             .ok_or(Error::SocketAddr)?;
         let stream = TcpStream::connect(socket_addr).await?;
-        Ok(SocksClient { stream, config })
+        SocksClient::from_stream(stream, config).await
     }
 
     pub async fn connect(proxy: &str, target: &str) -> Result<Self, Error> {
