@@ -262,8 +262,8 @@ impl TryFrom<u8> for AuthMethod {
 /// ```
 #[derive(Clone, Debug)]
 struct InitRequest {
-    pub ver: u8,
-    pub methods: Vec<AuthMethod>,
+    ver: u8,
+    methods: Vec<AuthMethod>,
 }
 
 impl InitRequest {

@@ -1,16 +1,126 @@
 use std::{
     convert::{From, TryFrom},
     net::SocketAddr,
+    pin::Pin,
+    task::Poll,
     u8,
 };
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use log::debug;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use url::Url;
 
 use crate::{consts, Error};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug)]
+pub struct Config {
+    pub target: Url,
+    pub cmd: Command,
+}
+
+pub struct Socks4Client<S>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    pub stream: S,
+    pub config: Config,
+}
+
+impl<S> Socks4Client<S>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    pub fn from_stream(stream: S, config: Config) -> Result<Socks4Client<S>, Error> {
+        Ok(Socks4Client { stream, config })
+    }
+
+    pub async fn handshake(&mut self) -> Result<(), Error> {
+        self.init_request().await?;
+        self.init_response().await?;
+        Ok(())
+    }
+
+    pub async fn init_request(&mut self) -> Result<(), Error> {
+        InitRequest::new(&self.config.target, &self.config.cmd)?
+            .send(&mut self.stream)
+            .await
+    }
+
+    pub async fn init_response(&mut self) -> Result<(), Error> {
+        let init_response = InitResponse::read(&mut self.stream).await?;
+        init_response.check()?;
+        Ok(())
+    }
+}
+
+impl Socks4Client<TcpStream> {
+    pub async fn new(proxy: Url, target: Url) -> Result<Socks4Client<TcpStream>, Error> {
+        let config = Config {
+            target,
+            cmd: Command::TcpConnection,
+        };
+        debug!("Socks4Client::new config: {:?}", &config);
+        let socket_addr = proxy
+            .socket_addrs(|| None)?
+            .pop()
+            .ok_or(Error::SocketAddr)?;
+        let stream = TcpStream::connect(socket_addr).await?;
+        Socks4Client::from_stream(stream, config)
+    }
+
+    pub async fn connect(proxy: &str, target: &str) -> Result<Socks4Client<TcpStream>, Error> {
+        debug!(
+            "Socks4Client::connect proxy: {}, target: {}",
+            &proxy, target
+        );
+        let mut client = Socks4Client::new(proxy.try_into()?, target.try_into()?).await?;
+        client.handshake().await?;
+        Ok(client)
+    }
+}
+
+impl<S> AsyncRead for Socks4Client<S>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        context: &mut std::task::Context,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.stream).poll_read(context, buf)
+    }
+}
+
+impl<S> AsyncWrite for Socks4Client<S>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        context: &mut std::task::Context,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.stream).poll_write(context, buf)
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        context: &mut std::task::Context,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.stream).poll_flush(context)
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        context: &mut std::task::Context,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.stream).poll_shutdown(context)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     TcpConnection,
     TcpBinding,
@@ -57,16 +167,16 @@ impl TryFrom<u8> for Command {
 /// NULL is a byte all zero bits.
 #[derive(Clone, Debug)]
 struct InitRequest {
-    pub ver: u8,
-    pub cmd: u8,
-    pub dstport: [u8; 2],
-    pub dstip: [u8; 4],
-    pub id: Vec<u8>,
-    pub term: u8,
+    ver: u8,
+    cmd: u8,
+    dstport: [u8; 2],
+    dstip: [u8; 4],
+    id: Vec<u8>,
+    term: u8,
 }
 
 impl InitRequest {
-    fn new(target: &Url) -> Result<Self, Error> {
+    fn new(target: &Url, cmd: &Command) -> Result<Self, Error> {
         let addr = target
             .socket_addrs(|| None)?
             .pop()
@@ -75,9 +185,17 @@ impl InitRequest {
             SocketAddr::V4(addr) => {
                 let dstip = addr.ip().octets();
                 let dstport = addr.port().to_be_bytes();
+                debug!(
+                    "InitRequest::new ver: {}, cmd: {:?}, dstport: {:?}, dstip: {:?}, id: [], term: {}",
+                    consts::SOCKS4_VERSION,
+                    &cmd,
+                    &dstport,
+                    &dstip,
+                    consts::NULL_TERMINATED
+                );
                 Ok(InitRequest {
                     ver: consts::SOCKS4_VERSION,
-                    cmd: Command::TcpConnection.into(),
+                    cmd: (*cmd).into(),
                     dstport,
                     dstip,
                     id: Vec::new(),
@@ -102,9 +220,10 @@ impl InitRequest {
     }
 
     // Send init request to server
-    async fn send(&self, stream: &mut TcpStream) -> Result<(), Error> {
+    async fn send<W: AsyncWrite + Unpin>(&self, mut writer: W) -> Result<(), Error> {
         let buf = self.to_vec();
-        stream.write_all(&buf).await?;
+        debug!("InitRequest::send buf: {:?}", &buf);
+        writer.write_all(&buf).await?;
         Ok(())
     }
 }
@@ -116,23 +235,27 @@ impl InitRequest {
 struct InitResponse {
     ver: u8,
     rep: u8,
-    // pub dstport: [u8; 2],
-    // pub dstip: [u8; 4],
+    dstport: [u8; 2],
+    dstip: [u8; 4],
 }
 
 impl InitResponse {
-    async fn read(stream: &mut TcpStream) -> Result<InitResponse, Error> {
+    async fn read<R: AsyncRead + Unpin>(mut reader: R) -> Result<InitResponse, Error> {
         let mut buf = [0u8; 8];
-        stream.read_exact(&mut buf).await?;
+        reader.read_exact(&mut buf).await?;
         let ver = buf[0];
         let rep = buf[1];
-        // let dstport = [buf[2], buf[3]];
-        // let dstip = [buf[4], buf[5], buf[6], buf[7]];
+        let dstport = [buf[2], buf[3]];
+        let dstip = [buf[4], buf[5], buf[6], buf[7]];
+        debug!(
+            "InitResponse:read ver: {}, rep: {}, dstport: {:?}, dstip: {:?}",
+            ver, rep, dstport, dstip
+        );
         Ok(InitResponse {
             ver,
             rep,
-            // dstport,
-            // dstip,
+            dstport,
+            dstip,
         })
     }
 
@@ -149,20 +272,4 @@ impl InitResponse {
             }
         }
     }
-}
-
-pub async fn connect(proxy: &str, target: &str) -> Result<TcpStream, Error> {
-    let proxy: &Url = &proxy.try_into()?;
-    let target = &target.try_into()?;
-    let socket_addr = proxy
-        .socket_addrs(|| None)?
-        .pop()
-        .ok_or(Error::SocketAddr)?;
-    let mut stream = TcpStream::connect(socket_addr).await?;
-
-    InitRequest::new(target)?.send(&mut stream).await?;
-    let init_response = InitResponse::read(&mut stream).await?;
-    init_response.check()?;
-
-    Ok(stream)
 }
