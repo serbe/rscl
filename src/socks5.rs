@@ -15,8 +15,8 @@ use crate::{consts, Error};
 
 #[derive(Debug)]
 pub struct Config {
-    pub proxy: Url,
     pub target: Url,
+    pub auth_data: AuthData,
     pub auth: Vec<AuthMethod>,
     pub cmd: Command,
 }
@@ -33,7 +33,7 @@ impl<S> SocksClient<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    pub async fn from_stream(stream: S, config: Config) -> Result<Self, Error> {
+    pub fn from_stream(stream: S, config: Config) -> Result<SocksClient<S>, Error> {
         Ok(SocksClient { stream, config })
     }
 
@@ -56,12 +56,9 @@ where
             .await?
             .check(&self.config.auth)?;
         if self.config.auth.contains(&AuthMethod::Plain) {
-            let password = self
-                .config
-                .proxy
-                .password()
-                .map_or(String::new(), |v| v.to_string());
-            UserPassRequest::new(self.config.proxy.username(), &password)?
+            let username = self.config.auth_data.username.clone();
+            let password = self.config.auth_data.password.clone();
+            UserPassRequest::new(&username, &password)?
                 .send(&mut self.stream)
                 .await?;
             UserPassResponse::read(&mut self.stream).await?.check()?;
@@ -86,27 +83,30 @@ where
 impl SocksClient<TcpStream> {
     pub async fn new(proxy: Url, target: Url) -> Result<SocksClient<TcpStream>, Error> {
         let mut auth = vec![AuthMethod::NoAuth];
-        if !proxy.username().is_empty() {
+        let username = proxy.username().to_string();
+        let password = proxy
+            .password()
+            .map_or(String::new(), |pass| pass.to_string());
+        if !username.is_empty() {
             auth.push(AuthMethod::Plain)
         };
-
+        let auth_data = AuthData { username, password };
         let config = Config {
-            proxy,
             target,
+            auth_data,
             auth,
             cmd: Command::TcpConnection,
         };
         debug!("SocksClient::new config: {:?}", &config);
-        let socket_addr = config
-            .proxy
+        let socket_addr = proxy
             .socket_addrs(|| None)?
             .pop()
             .ok_or(Error::SocketAddr)?;
         let stream = TcpStream::connect(socket_addr).await?;
-        SocksClient::from_stream(stream, config).await
+        SocksClient::from_stream(stream, config)
     }
 
-    pub async fn connect(proxy: &str, target: &str) -> Result<Self, Error> {
+    pub async fn connect(proxy: &str, target: &str) -> Result<SocksClient<TcpStream>, Error> {
         let mut client = SocksClient::new(proxy.parse()?, target.parse()?).await?;
         client.handshake().await?;
         Ok(client)
@@ -117,7 +117,7 @@ impl SocksClient<TcpStream> {
         target: &str,
         username: &str,
         password: &str,
-    ) -> Result<Self, Error> {
+    ) -> Result<SocksClient<TcpStream>, Error> {
         let mut proxy = proxy.parse::<Url>()?;
         let password = match password.is_empty() {
             true => None,
@@ -203,6 +203,12 @@ impl TryFrom<u8> for Command {
             v => Err(Error::CommandUnknown(v)),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthData {
+    username: String,
+    password: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
