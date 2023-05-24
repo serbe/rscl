@@ -47,10 +47,10 @@ where
             .await
     }
 
-    pub async fn init_response(&mut self) -> Result<(), Error> {
+    pub async fn init_response(&mut self) -> Result<ServerBound, Error> {
         let init_response = InitResponse::read(&mut self.stream).await?;
         init_response.check()?;
-        Ok(())
+        ServerBound::read(&mut self.stream).await
     }
 }
 
@@ -235,28 +235,16 @@ impl InitRequest {
 struct InitResponse {
     ver: u8,
     rep: u8,
-    dstport: [u8; 2],
-    dstip: [u8; 4],
 }
 
 impl InitResponse {
     async fn read<R: AsyncRead + Unpin>(mut reader: R) -> Result<InitResponse, Error> {
-        let mut buf = [0u8; 8];
+        let mut buf = [0u8; 2];
         reader.read_exact(&mut buf).await?;
         let ver = buf[0];
         let rep = buf[1];
-        let dstport = [buf[2], buf[3]];
-        let dstip = [buf[4], buf[5], buf[6], buf[7]];
-        debug!(
-            "InitResponse:read ver: {}, rep: {}, dstport: {:?}, dstip: {:?}",
-            ver, rep, dstport, dstip
-        );
-        Ok(InitResponse {
-            ver,
-            rep,
-            dstport,
-            dstip,
-        })
+        debug!("InitResponse:read ver: {}, rep: {}", ver, rep);
+        Ok(InitResponse { ver, rep })
     }
 
     fn check(&self) -> Result<(), Error> {
@@ -271,5 +259,24 @@ impl InitResponse {
                 _ => Err(Error::RequestWrong),
             }
         }
+    }
+}
+
+pub struct ServerBound {
+    pub dstip: [u8; 4],
+    pub dstport: [u8; 2],
+}
+
+impl ServerBound {
+    async fn read<R: AsyncRead + Unpin>(mut reader: R) -> Result<Self, Error> {
+        let mut buf = [0u8; 6];
+        reader.read_exact(&mut buf).await?;
+        let dstport = [buf[0], buf[1]];
+        let dstip = [buf[2], buf[3], buf[4], buf[5]];
+        debug!(
+            "ServerBound:read dstip: {:?}, dstport: {:?}",
+            dstip, dstport
+        );
+        Ok(ServerBound { dstip, dstport })
     }
 }
