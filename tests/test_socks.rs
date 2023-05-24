@@ -32,9 +32,11 @@ fn init_logger() {
     let _ = env_logger::builder().try_init();
 }
 
-async fn get_client(env_var: &str) -> SocksClient<TcpStream> {
-    let proxy = dotenv::var(env_var).unwrap();
+fn get_env(env_var: &str) -> Option<String> {
+    dotenv::var(env_var).ok()
+}
 
+async fn get_client(proxy: &str) -> SocksClient<TcpStream> {
     SocksClient::new(proxy.parse().unwrap(), SIMPLE_URL.parse().unwrap())
         .await
         .unwrap()
@@ -59,21 +61,21 @@ async fn test_socks4_client() {
     init_logger();
 
     let env_var = "TEST_SOCKS4_PROXY";
-    let proxy = dotenv::var(env_var).unwrap();
+    if let Some(proxy) = get_env(env_var) {
+        let mut client = Socks4Client::connect(&proxy, SIMPLE_URL).await.unwrap();
+        client
+            .write_all(b"GET /ip HTTP/1.0\r\nHost: httpbin.smp.io\r\n\r\n")
+            .await
+            .unwrap();
+        client.flush().await.unwrap();
+        let mut buf = Vec::new();
+        client.read_to_end(&mut buf).await.unwrap();
+        let body = String::from_utf8(buf).unwrap();
 
-    let mut client = Socks4Client::connect(&proxy, SIMPLE_URL).await.unwrap();
-    client
-        .write_all(b"GET /ip HTTP/1.0\r\nHost: httpbin.smp.io\r\n\r\n")
-        .await
-        .unwrap();
-    client.flush().await.unwrap();
-    let mut buf = Vec::new();
-    client.read_to_end(&mut buf).await.unwrap();
-    let body = String::from_utf8(buf).unwrap();
+        debug!("test_socks4_client body: {}", body);
 
-    debug!("test_socks4_client body: {}", body);
-
-    assert!(body.contains(IP.as_str()))
+        assert!(body.contains(IP.as_str()));
+    };
 }
 
 // TEST_SOCKS5_PROXY - an environment variable containing the socks5 server address without authorization. For example:
@@ -83,13 +85,14 @@ async fn test_socks_client() {
     init_logger();
 
     let env_var = "TEST_SOCKS5_PROXY";
+    if let Some(proxy) = get_env(env_var) {
+        let mut client = get_client(&proxy).await;
+        let body = get_body(&mut client).await;
 
-    let mut client = get_client(env_var).await;
-    let body = get_body(&mut client).await;
+        debug!("test_socks_client body: {}", body);
 
-    debug!("test_socks_client body: {}", body);
-
-    assert!(body.contains(IP.as_str()))
+        assert!(body.contains(IP.as_str()));
+    }
 }
 
 // TEST_SOCKS5_AUTH_PROXY - an environment variable containing the socks5 server address with authorization. For example:
@@ -100,12 +103,14 @@ async fn test_auth_socks_client() {
 
     let env_var = "TEST_SOCKS5_AUTH_PROXY";
 
-    let mut client = get_client(env_var).await;
-    let body = get_body(&mut client).await;
+    if let Some(proxy) = get_env(env_var) {
+        let mut client = get_client(&proxy).await;
+        let body = get_body(&mut client).await;
 
-    debug!("test_auth_socks_client body: {}", body);
+        debug!("test_auth_socks_client body: {}", body);
 
-    assert!(body.contains(IP.as_str()))
+        assert!(body.contains(IP.as_str()));
+    }
 }
 
 // TEST_SOCKS5_AUTH_PROXY - an environment variable containing the address of the socks5 server with erroneous authorization. For example:
@@ -116,7 +121,9 @@ async fn test_auth_socks_err_client() {
 
     let env_var = "TEST_SOCKS5_AUTH_ERR_PROXY";
 
-    let mut client = get_client(env_var).await;
+    if let Some(proxy) = get_env(env_var) {
+        let mut client = get_client(&proxy).await;
 
-    assert!(client.handshake().await.is_err());
+        assert!(client.handshake().await.is_err());
+    }
 }

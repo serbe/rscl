@@ -279,7 +279,7 @@ impl TryFrom<u8> for AuthMethod {
 /// NMETHODS field contains the number of method identifier octets that
 /// appear in the METHODS field.
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct InitRequest {
     ver: u8,
     methods: Vec<AuthMethod>,
@@ -350,6 +350,7 @@ impl InitRequest {
 /// referred to for a current list of METHOD numbers and their
 /// corresponding protocols.
 /// ```
+#[derive(Clone, Debug, PartialEq)]
 struct AuthResponse {
     ver: u8,
     method: AuthMethod,
@@ -362,24 +363,19 @@ impl AuthResponse {
         let ver = buf[0];
         let method = AuthMethod::try_from(buf[1])?;
         debug!("AuthResponse::read ver: {}, methods: {:?} ", &ver, &method);
-        if ver != consts::SOCKS5_VERSION {
-            Err(Error::NotSupportedSocksVersion(ver))
-        } else {
-            match method {
-                AuthMethod::NoAuth | AuthMethod::Plain => Ok(AuthResponse { ver, method }),
-                AuthMethod::GssApi => Err(Error::Unimplement),
-                AuthMethod::NoAccept => Err(Error::MethodNotAccept),
-            }
-        }
+        Ok(AuthResponse { ver, method })
     }
 
     fn check(&self, method: &[AuthMethod]) -> Result<(), Error> {
-        if !method.contains(&self.method) {
-            Err(Error::MethodWrong)
-        } else if self.ver != consts::SOCKS5_VERSION {
+        if self.ver != consts::SOCKS5_VERSION {
             Err(Error::NotSupportedSocksVersion(self.ver))
         } else {
-            Ok(())
+            match self.method {
+                AuthMethod::GssApi => Err(Error::Unimplement),
+                AuthMethod::NoAccept => Err(Error::MethodNotAccept),
+                auth_method if method.contains(&auth_method) => Ok(()),
+                _ => Err(Error::MethodWrong),
+            }
         }
     }
 }
@@ -405,6 +401,7 @@ impl AuthResponse {
 /// PASSWD field that follows. The PASSWD field contains the password
 /// association with the given UNAME.
 /// ```
+#[derive(Clone, Debug, PartialEq)]
 struct UserPassRequest {
     ver: u8,
     ulen: usize,
@@ -721,10 +718,16 @@ fn check_reply(value: u8) -> Result<(), Error> {
 mod tests {
     use super::*;
 
-    const CONNECTION: Command = Command::TcpConnection;
-    const BINDING: Command = Command::TcpBinding;
-    const UDP: Command = Command::UdpPort;
+    const CONNECTION: Command = Command::TcpConnection; // 0
+    const BINDING: Command = Command::TcpBinding; // 1
+    const UDP: Command = Command::UdpPort; // 2
     const URL: &str = "socks5://username:password@127.0.0.1:12345";
+    const NOAUTH: AuthMethod = AuthMethod::NoAuth; // 0
+    const GSS: AuthMethod = AuthMethod::GssApi; // 1
+    const PLAIN: AuthMethod = AuthMethod::Plain; // 2
+    const NOACCEPT: AuthMethod = AuthMethod::NoAccept; // 255
+    const USERNAME: &str = "username";
+    const PASSWORD: &str = "password";
 
     #[test]
     fn from_command() {
@@ -736,20 +739,20 @@ mod tests {
     #[test]
     fn try_to_command() {
         assert_eq!(
-            Command::try_from(consts::SOCKS5_COMMAND_TCP_CONNECT).unwrap(),
-            CONNECTION
+            Command::try_from(consts::SOCKS5_COMMAND_TCP_CONNECT),
+            Ok(CONNECTION)
         );
         assert_eq!(
-            Command::try_from(consts::SOCKS5_COMMAND_TCP_BIND).unwrap(),
-            BINDING
+            Command::try_from(consts::SOCKS5_COMMAND_TCP_BIND),
+            Ok(BINDING)
         );
         assert_eq!(
-            Command::try_from(consts::SOCKS5_COMMAND_UDP_ASSOCIATE).unwrap(),
-            UDP
+            Command::try_from(consts::SOCKS5_COMMAND_UDP_ASSOCIATE),
+            Ok(UDP)
         );
-        assert!(Command::try_from(0).is_err());
+        assert_eq!(Command::try_from(0), Err(Error::CommandUnknown(0)));
         for x in 4u8..=255u8 {
-            assert!(Command::try_from(x).is_err());
+            assert_eq!(Command::try_from(x), Err(Error::CommandUnknown(x)));
         }
     }
 
@@ -764,11 +767,142 @@ mod tests {
     #[test]
     fn auth_data() {
         let data = AuthData {
-            username: "username".to_string(),
-            password: "password".to_string(),
+            username: USERNAME.to_string(),
+            password: PASSWORD.to_string(),
         };
 
-        assert_eq!(AuthData::try_from(URL).unwrap(), data);
+        assert_eq!(AuthData::try_from(URL), Ok(data.clone()));
         assert_eq!(AuthData::from(&Url::parse(URL).unwrap()), data);
+    }
+
+    #[test]
+    fn from_auth_method() {
+        assert_eq!(u8::from(NOAUTH), consts::SOCKS5_AUTH_NONE);
+        assert_eq!(u8::from(GSS), consts::SOCKS5_AUTH_GSSAPI);
+        assert_eq!(u8::from(PLAIN), consts::SOCKS5_AUTH_USER_PASSWORD);
+        assert_eq!(u8::from(NOACCEPT), consts::SOCKS5_AUTH_NO_ACCEPT);
+    }
+
+    #[test]
+    fn try_to_auth_method() {
+        assert_eq!(AuthMethod::try_from(consts::SOCKS5_AUTH_NONE), Ok(NOAUTH));
+        assert_eq!(AuthMethod::try_from(consts::SOCKS5_AUTH_GSSAPI), Ok(GSS));
+        assert_eq!(
+            AuthMethod::try_from(consts::SOCKS5_AUTH_USER_PASSWORD),
+            Ok(PLAIN)
+        );
+        assert_eq!(
+            AuthMethod::try_from(consts::SOCKS5_AUTH_NO_ACCEPT),
+            Ok(NOACCEPT)
+        );
+        for x in 3u8..=254u8 {
+            assert_eq!(AuthMethod::try_from(x), Err(Error::MethodUnknown(x)));
+        }
+    }
+
+    #[test]
+    fn to_from_auth_method() {
+        for x in 1u8..=3u8 {
+            let command = Command::try_from(x).unwrap();
+            assert_eq!(u8::from(command), x);
+        }
+    }
+
+    #[test]
+    fn init_request() {
+        let init_req = InitRequest::new(&[PLAIN]);
+        assert_eq!(
+            init_req,
+            InitRequest {
+                ver: consts::SOCKS5_VERSION,
+                methods: vec![PLAIN]
+            }
+        );
+        assert_eq!(
+            init_req.to_vec(),
+            vec![
+                consts::SOCKS5_VERSION,
+                1u8,
+                consts::SOCKS5_AUTH_USER_PASSWORD
+            ]
+        );
+    }
+
+    #[test]
+    fn auth_response() {
+        let auth_resp = AuthResponse {
+            ver: consts::SOCKS5_VERSION,
+            method: PLAIN,
+        };
+        assert!(auth_resp.check(&[PLAIN]).is_ok());
+        assert_eq!(auth_resp.check(&[GSS]), Err(Error::MethodWrong));
+        assert_eq!(
+            AuthResponse {
+                ver: consts::SOCKS4_VERSION,
+                method: PLAIN,
+            }
+            .check(&[PLAIN]),
+            Err(Error::NotSupportedSocksVersion(consts::SOCKS4_VERSION))
+        );
+        assert_eq!(
+            AuthResponse {
+                ver: consts::SOCKS5_VERSION,
+                method: NOACCEPT,
+            }
+            .check(&[PLAIN]),
+            Err(Error::MethodNotAccept)
+        );
+        assert_eq!(
+            AuthResponse {
+                ver: consts::SOCKS5_VERSION,
+                method: GSS,
+            }
+            .check(&[PLAIN]),
+            Err(Error::Unimplement)
+        );
+    }
+
+    #[test]
+    fn user_pass_request() {
+        let up_request = UserPassRequest::new(USERNAME, PASSWORD);
+        assert_eq!(
+            up_request,
+            Ok(UserPassRequest {
+                ver: 1u8,
+                ulen: 8,
+                uname: USERNAME.as_bytes().to_vec(),
+                plen: 8,
+                passwd: PASSWORD.as_bytes().to_vec()
+            })
+        );
+        assert_eq!(
+            UserPassRequest::new(&(0..257).map(|_| "X").collect::<String>(), PASSWORD),
+            Err(Error::UnameLenOverflow(257))
+        );
+        assert_eq!(
+            UserPassRequest::new(USERNAME, &(0..258).map(|_| "X").collect::<String>()),
+            Err(Error::PasswdLenOverflow(258))
+        );
+        assert_eq!(
+            up_request.unwrap().to_vec(),
+            vec![
+                1, 8, 117, 115, 101, 114, 110, 97, 109, 101, 8, 112, 97, 115, 115, 119, 111, 114,
+                100
+            ]
+        );
+    }
+
+    #[test]
+    fn user_pass_response() {
+        let up_response = UserPassResponse { ver: 1, status: 0 };
+        assert!(up_response.check().is_ok());
+        assert_eq!(
+            UserPassResponse { ver: 3, status: 1 }.check(),
+            Err(Error::NotSupportedVersion(3))
+        );
+        assert_eq!(
+            UserPassResponse { ver: 1, status: 2 }.check(),
+            Err(Error::WrongStatus(2))
+        );
     }
 }
