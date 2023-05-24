@@ -83,3 +83,80 @@ pub enum Error {
     #[error("No url")]
     NoUrl,
 }
+
+impl PartialEq for Error {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Error::UrlParseError(err), Error::UrlParseError(other_err)) => {
+                err.to_string() == other_err.to_string()
+            }
+            (
+                Error::NotSupportedSocksVersion(value),
+                Error::NotSupportedSocksVersion(other_value),
+            ) => value == other_value,
+            (Error::NotSupportedVersion(value), Error::NotSupportedVersion(other_value)) => {
+                value == other_value
+            }
+            (Error::Io(err), Error::Io(other_err)) => err.to_string() == other_err.to_string(),
+            (Error::Utf8Error(err), Error::Utf8Error(other_err)) => {
+                err.to_string() == other_err.to_string()
+            }
+            (Error::StdParseAddr(err), Error::StdParseAddr(other_err)) => {
+                err.to_string() == other_err.to_string()
+            }
+            (Error::Unimplement, Error::Unimplement) => true,
+            (Error::MethodNotAccept, Error::MethodNotAccept) => true,
+            (Error::MethodUnknown(value), Error::MethodUnknown(other_value)) => {
+                value == other_value
+            }
+            (Error::MethodWrong, Error::MethodWrong) => true,
+            (Error::SocketAddr, Error::SocketAddr) => true,
+            (Error::WrongReserved(value), Error::WrongReserved(other_value)) => {
+                value == other_value
+            }
+            (
+                Error::AddressTypeNotSupported(value),
+                Error::AddressTypeNotSupported(other_value),
+            ) => value == other_value,
+            (Error::CommandUnknown(value), Error::CommandUnknown(other_value)) => {
+                value == other_value
+            }
+            (Error::ParseIPv6, Error::ParseIPv6) => true,
+            (Error::ParseHost, Error::ParseHost) => true,
+            (Error::ParsePort, Error::ParsePort) => true,
+            (Error::UnsupportedScheme(value), Error::UnsupportedScheme(other_value)) => {
+                value == other_value
+            }
+            (Error::EmptyScheme, Error::EmptyScheme) => true,
+            (Error::EmptyAuthority, Error::EmptyAuthority) => true,
+            (Error::UnameLenOverflow(value), Error::UnameLenOverflow(other_value)) => {
+                value == other_value
+            }
+            (Error::PasswdLenOverflow(value), Error::PasswdLenOverflow(other_value)) => {
+                value == other_value
+            }
+            (Error::WrongStatus(value), Error::WrongStatus(other_value)) => value == other_value,
+            (Error::ReplyGeneralFailure, Error::ReplyGeneralFailure) => true,
+            (Error::ReplyConnectionNotAllowed, Error::ReplyConnectionNotAllowed) => true,
+            (Error::ReplyNetworkUnreachable, Error::ReplyNetworkUnreachable) => true,
+            (Error::ReplyHostUnreachable, Error::ReplyHostUnreachable) => true,
+            (Error::ReplyConnectionRefused, Error::ReplyConnectionRefused) => true,
+            (Error::ReplyTtlExpired, Error::ReplyTtlExpired) => true,
+            (Error::ReplyCommandNotSupported, Error::ReplyCommandNotSupported) => true,
+            (Error::ReplyAddressTypeNotSupported, Error::ReplyAddressTypeNotSupported) => true,
+            (Error::ReplyUnassigned(value), Error::ReplyUnassigned(other_value)) => {
+                value == other_value
+            }
+            (Error::BadUsername, Error::BadUsername) => true,
+            (Error::BadPassword, Error::BadPassword) => true,
+            (Error::RequestReject, Error::RequestReject) => true,
+            (Error::RequestFailedIdentd, Error::RequestFailedIdentd) => true,
+            (Error::RequestFailedUserID, Error::RequestFailedUserID) => true,
+            (Error::RequestWrong, Error::RequestWrong) => true,
+            (Error::NoIpV4Address, Error::NoIpV4Address) => true,
+            (Error::NoSetTimeout, Error::NoSetTimeout) => true,
+            (Error::NoUrl, Error::NoUrl) => true,
+            _ => false,
+        }
+    }
+}
