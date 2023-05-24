@@ -1,4 +1,5 @@
 use log::debug;
+use once_cell::sync::Lazy;
 use rscl::socks4::Socks4Client;
 use rscl::socks5::SocksClient;
 use tokio::{
@@ -7,6 +8,24 @@ use tokio::{
 };
 
 const SIMPLE_URL: &'static str = "http://httpbin.smp.io/ip";
+
+static IP: Lazy<String> = Lazy::new(|| crate::my_ip());
+
+fn my_ip() -> String {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+
+    let mut stream = TcpStream::connect("api.ipify.org:80").unwrap();
+    stream
+        .write_all(b"GET / HTTP/1.0\r\nHost: api.ipify.org\r\n\r\n")
+        .unwrap();
+    stream.flush().unwrap();
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).unwrap();
+    let body = String::from_utf8(buf).unwrap();
+    let split: Vec<&str> = body.splitn(2, "\r\n\r\n").collect();
+    split[1].to_string()
+}
 
 fn init_logger() {
     dotenv::dotenv().ok();
@@ -53,6 +72,8 @@ async fn test_socks4_client() {
     let body = String::from_utf8(buf).unwrap();
 
     debug!("test_socks4_client body: {}", body);
+
+    assert!(body.contains(IP.as_str()))
 }
 
 // TEST_SOCKS5_PROXY - an environment variable containing the socks5 server address without authorization. For example:
@@ -67,6 +88,8 @@ async fn test_socks_client() {
     let body = get_body(&mut client).await;
 
     debug!("test_socks_client body: {}", body);
+
+    assert!(body.contains(IP.as_str()))
 }
 
 // TEST_SOCKS5_AUTH_PROXY - an environment variable containing the socks5 server address with authorization. For example:
@@ -81,6 +104,8 @@ async fn test_auth_socks_client() {
     let body = get_body(&mut client).await;
 
     debug!("test_auth_socks_client body: {}", body);
+
+    assert!(body.contains(IP.as_str()))
 }
 
 // TEST_SOCKS5_AUTH_PROXY - an environment variable containing the address of the socks5 server with erroneous authorization. For example:

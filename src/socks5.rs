@@ -83,14 +83,10 @@ where
 impl SocksClient<TcpStream> {
     pub async fn new(proxy: Url, target: Url) -> Result<SocksClient<TcpStream>, Error> {
         let mut auth = vec![AuthMethod::NoAuth];
-        let username = proxy.username().to_string();
-        let password = proxy
-            .password()
-            .map_or(String::new(), |pass| pass.to_string());
-        if !username.is_empty() {
+        let auth_data = AuthData::from(&proxy);
+        if !auth_data.username.is_empty() {
             auth.push(AuthMethod::Plain)
         };
-        let auth_data = AuthData { username, password };
         let config = Config {
             target,
             auth_data,
@@ -209,6 +205,29 @@ impl TryFrom<u8> for Command {
 pub struct AuthData {
     username: String,
     password: String,
+}
+
+impl TryFrom<&str> for AuthData {
+    type Error = Error;
+
+    fn try_from(value: &str) -> Result<Self, Error> {
+        let url = Url::parse(value)?;
+        let username = url.username().to_string();
+        let password = url
+            .password()
+            .map_or(String::new(), |pass| pass.to_string());
+        Ok(AuthData { username, password })
+    }
+}
+
+impl From<&Url> for AuthData {
+    fn from(value: &Url) -> Self {
+        let username = value.username().to_string();
+        let password = value
+            .password()
+            .map_or(String::new(), |pass| pass.to_string());
+        AuthData { username, password }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -695,5 +714,61 @@ fn check_reply(value: u8) -> Result<(), Error> {
         consts::SOCKS5_REPLY_COMMAND_NOT_SUPPORTED => Err(Error::ReplyCommandNotSupported),
         consts::SOCKS5_REPLY_ADDRESS_TYPE_NOT_SUPPORTED => Err(Error::ReplyAddressTypeNotSupported),
         v => Err(Error::ReplyUnassigned(v)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CONNECTION: Command = Command::TcpConnection;
+    const BINDING: Command = Command::TcpBinding;
+    const UDP: Command = Command::UdpPort;
+    const URL: &str = "socks5://username:password@127.0.0.1:12345";
+
+    #[test]
+    fn from_command() {
+        assert_eq!(u8::from(CONNECTION), consts::SOCKS5_COMMAND_TCP_CONNECT);
+        assert_eq!(u8::from(BINDING), consts::SOCKS5_COMMAND_TCP_BIND);
+        assert_eq!(u8::from(UDP), consts::SOCKS5_COMMAND_UDP_ASSOCIATE);
+    }
+
+    #[test]
+    fn try_to_command() {
+        assert_eq!(
+            Command::try_from(consts::SOCKS5_COMMAND_TCP_CONNECT).unwrap(),
+            CONNECTION
+        );
+        assert_eq!(
+            Command::try_from(consts::SOCKS5_COMMAND_TCP_BIND).unwrap(),
+            BINDING
+        );
+        assert_eq!(
+            Command::try_from(consts::SOCKS5_COMMAND_UDP_ASSOCIATE).unwrap(),
+            UDP
+        );
+        assert!(Command::try_from(0).is_err());
+        for x in 4u8..=255u8 {
+            assert!(Command::try_from(x).is_err());
+        }
+    }
+
+    #[test]
+    fn to_from_command() {
+        for x in 1u8..=3u8 {
+            let command = Command::try_from(x).unwrap();
+            assert_eq!(u8::from(command), x);
+        }
+    }
+
+    #[test]
+    fn auth_data() {
+        let data = AuthData {
+            username: "username".to_string(),
+            password: "password".to_string(),
+        };
+
+        assert_eq!(AuthData::try_from(URL).unwrap(), data);
+        assert_eq!(AuthData::from(&Url::parse(URL).unwrap()), data);
     }
 }
