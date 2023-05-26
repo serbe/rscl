@@ -17,3 +17,5 @@ Cargo.lock
 /target
 .idea
 .env
+*.profraw
+*.html

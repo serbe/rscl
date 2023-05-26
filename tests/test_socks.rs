@@ -1,7 +1,7 @@
 use log::debug;
 use once_cell::sync::Lazy;
-use rscl::socks4::Socks4Client;
-use rscl::socks5::SocksClient;
+use rscl::socks4::Socks4Stream;
+use rscl::socks5::Socks5Stream;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -36,40 +36,40 @@ fn get_env(env_var: &str) -> Option<String> {
     dotenv::var(env_var).ok()
 }
 
-async fn get_client(proxy: &str) -> SocksClient<TcpStream> {
-    SocksClient::new(proxy.parse().unwrap(), SIMPLE_URL.parse().unwrap())
+async fn get_socks5_stream(proxy: &str) -> Socks5Stream<TcpStream> {
+    Socks5Stream::new(proxy.parse().unwrap(), SIMPLE_URL.parse().unwrap())
         .await
         .unwrap()
 }
 
-async fn get_body(client: &mut SocksClient<TcpStream>) -> String {
-    client.handshake().await.unwrap();
-    client
+async fn get_body(socks5_stream: &mut Socks5Stream<TcpStream>) -> String {
+    socks5_stream.handshake().await.unwrap();
+    socks5_stream
         .write_all(b"GET /ip HTTP/1.0\r\nHost: httpbin.smp.io\r\n\r\n")
         .await
         .unwrap();
-    client.flush().await.unwrap();
+    socks5_stream.flush().await.unwrap();
     let mut buf = Vec::new();
-    client.read_to_end(&mut buf).await.unwrap();
+    socks5_stream.read_to_end(&mut buf).await.unwrap();
     String::from_utf8(buf).unwrap()
 }
 
 // TEST_SOCKS4_PROXY - an environment variable containing the socks5 server address without authorization. For example:
 // socks4://127.0.0.1:3128
 #[tokio::test]
-async fn test_socks4_client() {
+async fn test_socks4_stream() {
     init_logger();
 
     let env_var = "TEST_SOCKS4_PROXY";
     if let Some(proxy) = get_env(env_var) {
-        let mut client = Socks4Client::connect(&proxy, SIMPLE_URL).await.unwrap();
-        client
+        let mut socks4_stream = Socks4Stream::connect(&proxy, SIMPLE_URL).await.unwrap();
+        socks4_stream
             .write_all(b"GET /ip HTTP/1.0\r\nHost: httpbin.smp.io\r\n\r\n")
             .await
             .unwrap();
-        client.flush().await.unwrap();
+        socks4_stream.flush().await.unwrap();
         let mut buf = Vec::new();
-        client.read_to_end(&mut buf).await.unwrap();
+        socks4_stream.read_to_end(&mut buf).await.unwrap();
         let body = String::from_utf8(buf).unwrap();
 
         debug!("test_socks4_client body: {}", body);
@@ -81,13 +81,13 @@ async fn test_socks4_client() {
 // TEST_SOCKS5_PROXY - an environment variable containing the socks5 server address without authorization. For example:
 // socks5://127.0.0.1:3128
 #[tokio::test]
-async fn test_socks_client() {
+async fn test_socks5_stream() {
     init_logger();
 
     let env_var = "TEST_SOCKS5_PROXY";
     if let Some(proxy) = get_env(env_var) {
-        let mut client = get_client(&proxy).await;
-        let body = get_body(&mut client).await;
+        let mut socks5_stream = get_socks5_stream(&proxy).await;
+        let body = get_body(&mut socks5_stream).await;
 
         debug!("test_socks_client body: {}", body);
 
@@ -98,14 +98,14 @@ async fn test_socks_client() {
 // TEST_SOCKS5_AUTH_PROXY - an environment variable containing the socks5 server address with authorization. For example:
 // socks5://username:password@127.0.0.1:3128
 #[tokio::test]
-async fn test_auth_socks_client() {
+async fn test_auth_socks5_stream() {
     init_logger();
 
     let env_var = "TEST_SOCKS5_AUTH_PROXY";
 
     if let Some(proxy) = get_env(env_var) {
-        let mut client = get_client(&proxy).await;
-        let body = get_body(&mut client).await;
+        let mut socks5_stream = get_socks5_stream(&proxy).await;
+        let body = get_body(&mut socks5_stream).await;
 
         debug!("test_auth_socks_client body: {}", body);
 
@@ -116,14 +116,14 @@ async fn test_auth_socks_client() {
 // TEST_SOCKS5_AUTH_PROXY - an environment variable containing the address of the socks5 server with erroneous authorization. For example:
 // socks5://wrong_username:wrong_password@127.0.0.1:3128
 #[tokio::test]
-async fn test_auth_socks_err_client() {
+async fn test_auth_socks5_stream_err() {
     init_logger();
 
     let env_var = "TEST_SOCKS5_AUTH_ERR_PROXY";
 
     if let Some(proxy) = get_env(env_var) {
-        let mut client = get_client(&proxy).await;
+        let mut socks5_stream = get_socks5_stream(&proxy).await;
 
-        assert!(client.handshake().await.is_err());
+        assert!(socks5_stream.handshake().await.is_err());
     }
 }

@@ -21,7 +21,7 @@ pub struct Config {
     pub cmd: Command,
 }
 
-pub struct SocksClient<S>
+pub struct Socks5Stream<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -29,12 +29,12 @@ where
     pub config: Config,
 }
 
-impl<S> SocksClient<S>
+impl<S> Socks5Stream<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    pub fn from_stream(stream: S, config: Config) -> Result<SocksClient<S>, Error> {
-        Ok(SocksClient { stream, config })
+    pub fn from_stream(stream: S, config: Config) -> Result<Socks5Stream<S>, Error> {
+        Ok(Socks5Stream { stream, config })
     }
 
     pub async fn handshake(&mut self) -> Result<(), Error> {
@@ -80,8 +80,8 @@ where
     }
 }
 
-impl SocksClient<TcpStream> {
-    pub async fn new(proxy: Url, target: Url) -> Result<SocksClient<TcpStream>, Error> {
+impl Socks5Stream<TcpStream> {
+    pub async fn new(proxy: Url, target: Url) -> Result<Socks5Stream<TcpStream>, Error> {
         let mut auth = vec![AuthMethod::NoAuth];
         let auth_data = AuthData::from(&proxy);
         if !auth_data.username.is_empty() {
@@ -99,13 +99,13 @@ impl SocksClient<TcpStream> {
             .pop()
             .ok_or(Error::SocketAddr)?;
         let stream = TcpStream::connect(socket_addr).await?;
-        SocksClient::from_stream(stream, config)
+        Socks5Stream::from_stream(stream, config)
     }
 
-    pub async fn connect(proxy: &str, target: &str) -> Result<SocksClient<TcpStream>, Error> {
-        let mut client = SocksClient::new(proxy.parse()?, target.parse()?).await?;
-        client.handshake().await?;
-        Ok(client)
+    pub async fn connect(proxy: &str, target: &str) -> Result<Socks5Stream<TcpStream>, Error> {
+        let mut socks_stream = Socks5Stream::new(proxy.parse()?, target.parse()?).await?;
+        socks_stream.handshake().await?;
+        Ok(socks_stream)
     }
 
     pub async fn connect_plain(
@@ -113,7 +113,7 @@ impl SocksClient<TcpStream> {
         target: &str,
         username: &str,
         password: &str,
-    ) -> Result<SocksClient<TcpStream>, Error> {
+    ) -> Result<Socks5Stream<TcpStream>, Error> {
         let mut proxy = proxy.parse::<Url>()?;
         let password = match password.is_empty() {
             true => None,
@@ -125,13 +125,13 @@ impl SocksClient<TcpStream> {
         proxy
             .set_password(password)
             .map_err(|_| Error::BadPassword)?;
-        let mut client = SocksClient::new(proxy, target.parse()?).await?;
-        client.handshake().await?;
-        Ok(client)
+        let mut socks_stream = Socks5Stream::new(proxy, target.parse()?).await?;
+        socks_stream.handshake().await?;
+        Ok(socks_stream)
     }
 }
 
-impl<S> AsyncRead for SocksClient<S>
+impl<S> AsyncRead for Socks5Stream<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -144,7 +144,7 @@ where
     }
 }
 
-impl<S> AsyncWrite for SocksClient<S>
+impl<S> AsyncWrite for Socks5Stream<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {

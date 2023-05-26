@@ -19,7 +19,7 @@ pub struct Config {
     pub cmd: Command,
 }
 
-pub struct Socks4Client<S>
+pub struct Socks4Stream<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -27,12 +27,12 @@ where
     pub config: Config,
 }
 
-impl<S> Socks4Client<S>
+impl<S> Socks4Stream<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    pub fn from_stream(stream: S, config: Config) -> Result<Socks4Client<S>, Error> {
-        Ok(Socks4Client { stream, config })
+    pub fn from_stream(stream: S, config: Config) -> Result<Socks4Stream<S>, Error> {
+        Ok(Socks4Stream { stream, config })
     }
 
     pub async fn handshake(&mut self) -> Result<(), Error> {
@@ -54,33 +54,33 @@ where
     }
 }
 
-impl Socks4Client<TcpStream> {
-    pub async fn new(proxy: Url, target: Url) -> Result<Socks4Client<TcpStream>, Error> {
+impl Socks4Stream<TcpStream> {
+    pub async fn new(proxy: Url, target: Url) -> Result<Socks4Stream<TcpStream>, Error> {
         let config = Config {
             target,
             cmd: Command::TcpConnection,
         };
-        debug!("Socks4Client::new config: {:?}", &config);
+        debug!("Socks4Stream::new config: {:?}", &config);
         let socket_addr = proxy
             .socket_addrs(|| None)?
             .pop()
             .ok_or(Error::SocketAddr)?;
         let stream = TcpStream::connect(socket_addr).await?;
-        Socks4Client::from_stream(stream, config)
+        Socks4Stream::from_stream(stream, config)
     }
 
-    pub async fn connect(proxy: &str, target: &str) -> Result<Socks4Client<TcpStream>, Error> {
+    pub async fn connect(proxy: &str, target: &str) -> Result<Socks4Stream<TcpStream>, Error> {
         debug!(
-            "Socks4Client::connect proxy: {}, target: {}",
+            "Socks4Stream::connect proxy: {}, target: {}",
             &proxy, target
         );
-        let mut client = Socks4Client::new(proxy.try_into()?, target.try_into()?).await?;
-        client.handshake().await?;
-        Ok(client)
+        let mut socks_stream = Socks4Stream::new(proxy.try_into()?, target.try_into()?).await?;
+        socks_stream.handshake().await?;
+        Ok(socks_stream)
     }
 }
 
-impl<S> AsyncRead for Socks4Client<S>
+impl<S> AsyncRead for Socks4Stream<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -93,7 +93,7 @@ where
     }
 }
 
-impl<S> AsyncWrite for Socks4Client<S>
+impl<S> AsyncWrite for Socks4Stream<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
