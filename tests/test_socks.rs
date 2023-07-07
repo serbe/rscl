@@ -1,7 +1,7 @@
 use log::debug;
 use once_cell::sync::Lazy;
-use rscl::socks4::Socks4Stream;
 use rscl::socks5::Socks5Stream;
+use rscl::{client::SocksClient, socks4::Socks4Stream};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -52,6 +52,30 @@ async fn get_body(socks5_stream: &mut Socks5Stream<TcpStream>) -> String {
     let mut buf = Vec::new();
     socks5_stream.read_to_end(&mut buf).await.unwrap();
     String::from_utf8(buf).unwrap()
+}
+
+// TEST_SOCKS4_PROXY - an environment variable containing the socks5 server address without authorization. For example:
+// socks4://127.0.0.1:3128
+#[tokio::test]
+async fn test_socks_client() {
+    init_logger();
+
+    let env_var = "TEST_SOCKS5_PROXY";
+    if let Some(proxy) = get_env(env_var) {
+        let mut socks_client = SocksClient::connect(&proxy, SIMPLE_URL).await.unwrap();
+        socks_client
+            .write_all(b"GET /ip HTTP/1.0\r\nHost: httpbin.smp.io\r\n\r\n")
+            .await
+            .unwrap();
+        socks_client.flush().await.unwrap();
+        let mut buf = Vec::new();
+        socks_client.read_to_end(&mut buf).await.unwrap();
+        let body = String::from_utf8(buf).unwrap();
+
+        debug!("test_socks_client body: {}", body);
+
+        assert!(body.contains(IP.as_str()));
+    };
 }
 
 // TEST_SOCKS4_PROXY - an environment variable containing the socks5 server address without authorization. For example:
