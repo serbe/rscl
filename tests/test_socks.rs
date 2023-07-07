@@ -67,8 +67,9 @@ async fn test_socks_client() {
             .await
             .unwrap();
         socks_client.flush().await.unwrap();
+        let mut stream = socks_client.stream();
         let mut buf = Vec::new();
-        socks_client.read_to_end(&mut buf).await.unwrap();
+        stream.read_to_end(&mut buf).await.unwrap();
         let body = String::from_utf8(buf).unwrap();
 
         debug!("test_socks_client body: {}", body);

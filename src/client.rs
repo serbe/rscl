@@ -3,10 +3,10 @@ use std::task::Poll;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
-use url::Url;
 
 use crate::socks4::Socks4Stream;
 use crate::socks5::Socks5Stream;
+use crate::utils::IntoUrl;
 use crate::Error;
 
 pub enum SocksClient<S>
@@ -15,6 +15,25 @@ where
 {
     Socks5(Socks5Stream<S>),
     Socks4(Socks4Stream<S>),
+}
+
+impl<S> SocksClient<S>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    async fn handshake(&mut self) -> Result<(), Error> {
+        match self {
+            SocksClient::Socks5(client) => client.handshake().await,
+            SocksClient::Socks4(client) => client.handshake().await,
+        }
+    }
+
+    pub fn stream(self) -> S {
+        match self {
+            SocksClient::Socks5(s) => s.stream,
+            SocksClient::Socks4(s) => s.stream,
+        }
+    }
 }
 
 impl<S> AsyncRead for SocksClient<S>
@@ -29,18 +48,6 @@ where
         match Pin::get_mut(self) {
             SocksClient::Socks5(s) => Pin::new(s).poll_read(context, buf),
             SocksClient::Socks4(s) => Pin::new(s).poll_read(context, buf),
-        }
-    }
-}
-
-impl<S> SocksClient<S>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    async fn handshake(&mut self) -> Result<(), Error> {
-        match self {
-            SocksClient::Socks5(client) => client.handshake().await,
-            SocksClient::Socks4(client) => client.handshake().await,
         }
     }
 }
@@ -82,14 +89,17 @@ where
 }
 
 impl SocksClient<TcpStream> {
-    pub async fn connect(proxy: &str, target: &str) -> Result<SocksClient<TcpStream>, Error> {
-        let proxy = proxy.parse::<Url>()?;
+    pub async fn connect<U: IntoUrl, V: IntoUrl>(
+        proxy: U,
+        target: V,
+    ) -> Result<SocksClient<TcpStream>, Error> {
+        let proxy = proxy.into_url()?;
         let mut client = match proxy.scheme() {
             "socks4" => Ok(SocksClient::Socks4(
-                Socks4Stream::new(proxy, target.parse()?).await?,
+                Socks4Stream::new(proxy, target.into_url()?).await?,
             )),
             "socks5" => Ok(SocksClient::Socks5(
-                Socks5Stream::new(proxy, target.parse()?).await?,
+                Socks5Stream::new(proxy, target.into_url()?).await?,
             )),
             s => Err(Error::UnsupportedScheme(s.to_string())),
         }?;
@@ -97,13 +107,13 @@ impl SocksClient<TcpStream> {
         Ok(client)
     }
 
-    pub async fn connect_plain(
-        proxy: &str,
-        target: &str,
+    pub async fn connect_plain<U: IntoUrl, V: IntoUrl>(
+        proxy: U,
+        target: V,
         username: &str,
         password: &str,
     ) -> Result<Socks5Stream<TcpStream>, Error> {
-        let mut proxy = proxy.parse::<Url>()?;
+        let mut proxy = proxy.into_url()?;
         let password = match password.is_empty() {
             true => None,
             false => Some(password),
@@ -114,7 +124,7 @@ impl SocksClient<TcpStream> {
         proxy
             .set_password(password)
             .map_err(|_| Error::BadPassword)?;
-        let mut client = Socks5Stream::new(proxy, target.parse()?).await?;
+        let mut client = Socks5Stream::new(proxy, target.into_url()?).await?;
         client.handshake().await?;
         Ok(client)
     }
