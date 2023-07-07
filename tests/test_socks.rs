@@ -1,7 +1,6 @@
 use log::debug;
 use once_cell::sync::Lazy;
-use rscl::socks5::Socks5Stream;
-use rscl::{client::SocksClient, socks4::Socks4Stream};
+use rscl::{socks4::Socks4Stream, socks5::Socks5Stream, SocksClient};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
