@@ -3,7 +3,6 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr},
     pin::Pin,
     task::Poll,
-    u8,
 };
 
 use log::debug;

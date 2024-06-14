@@ -3,7 +3,6 @@ use std::{
     net::SocketAddr,
     pin::Pin,
     task::Poll,
-    u8,
 };
 
 use log::debug;
