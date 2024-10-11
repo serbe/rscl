@@ -27,12 +27,12 @@ fn my_ip() -> String {
 }
 
 fn init_logger() {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     let _ = env_logger::builder().try_init();
 }
 
 fn get_env(env_var: &str) -> Option<String> {
-    dotenv::var(env_var).ok()
+    dotenvy::var(env_var).ok()
 }
 
 async fn get_socks5_stream(proxy: &str) -> Socks5Stream<TcpStream> {
