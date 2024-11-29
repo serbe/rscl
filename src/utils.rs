@@ -6,19 +6,19 @@ pub trait IntoUrl {
     fn into_url(self) -> Result<Url, Error>;
 }
 
-impl<'a> IntoUrl for &'a Url {
+impl IntoUrl for &Url {
     fn into_url(self) -> Result<Url, Error> {
         Ok(self.clone())
     }
 }
 
-impl<'a> IntoUrl for &'a str {
+impl IntoUrl for &str {
     fn into_url(self) -> Result<Url, Error> {
         Ok(Url::parse(self)?)
     }
 }
 
-impl<'a> IntoUrl for &'a String {
+impl IntoUrl for &String {
     fn into_url(self) -> Result<Url, Error> {
         Ok(Url::parse(self)?)
     }
